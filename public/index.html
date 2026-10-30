@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Notizheft</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <button class="icon-btn only-mobile" id="sidebarToggle" title="Seitenleiste">☰</button>
+    <div class="brand">Notizheft</div>
+    <div class="topbar-spacer"></div>
+    <label class="semester-picker" title="Semester wechseln">
+      <select id="semesterSelect"></select>
+    </label>
+    <button class="icon-btn" id="settingsBtn" title="Einstellungen">⚙︎</button>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar"></aside>
+    <main class="main" id="main"></main>
+  </div>
+
+  <div class="modal-backdrop" id="modalBackdrop" hidden></div>
+  <div class="toast-area" id="toasts"></div>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

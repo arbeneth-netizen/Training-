@@ -1,0 +1,13 @@
+{
+  "name": "uni-notizheft",
+  "version": "1.0.0",
+  "description": "Notiz-Website für die Uni im Pages-Stil mit KI-Verbesserung, Fachbegriff-Glossar und Stundenplan-Scan",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0"
+  }
+}
