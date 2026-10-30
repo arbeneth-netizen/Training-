@@ -188,7 +188,7 @@ const ui = {
   loc: { moduleId: undefined, folderId: null }, // moduleId undefined = Wurzel, null = Sonstiges
   docId: null,
   tool: "text",
-  pen: { kind: "pen", color: PEN_COLORS[0], width: 3 },
+  pen: { kind: "pen", color: PEN_COLORS[0], width: 3, eraseMode: "stroke", autoShape: localStorage.getItem("nh-autoshape") !== "0" },
   panel: null, // task | design
   sort: localStorage.getItem("nh-sort") || "updated",
   layout: localStorage.getItem("nh-layout") || "grid",
@@ -1032,7 +1032,7 @@ function renderEditor(main) {
                 <button class="bt-del" title="Block löschen">✕</button>
                 <span class="bt-resize" title="Breite ändern"></span>
               </div>
-              <div class="float-bar" id="lassoBar" hidden><button data-l="delete">🗑 Löschen</button><span>oder ziehen zum Verschieben</span></div>
+              <div class="float-bar" id="lassoBar" hidden><span>✨ Auswahl ziehen zum Verschieben</span></div>
               <div class="float-bar" id="imgBar" hidden>
                 <button data-iw="25">25 %</button><button data-iw="50">50 %</button><button data-iw="75">75 %</button><button data-iw="100">100 %</button>
                 <button data-ia="left" title="Links">⇤</button><button data-ia="center" title="Mitte">⇹</button><button data-ia="right" title="Rechts">⇥</button>
@@ -2522,16 +2522,22 @@ function renderPenBar(bar) {
       <button data-pen="pen" class="${pen.kind === "pen" ? "on" : ""}">✎ Stift</button>
       <button data-pen="marker" class="${pen.kind === "marker" ? "on" : ""}">▮ Marker</button>
       <button data-pen="shape" class="${pen.kind === "shape" ? "on" : ""}">△ Formen</button>
-      <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">⌫ Radierer</button>
-      <button data-pen="lasso" class="${pen.kind === "lasso" ? "on" : ""}" title="Einkreisen, dann löschen oder verschieben">◌ Lasso</button>
+      <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">🧽 Radiergummi</button>
+      <button data-pen="lasso" class="${pen.kind === "lasso" ? "on" : ""}" title="Gemaltes einkreisen und verschieben">✨ Magic Stift</button>
     </div>
+    ${pen.kind === "pen" ? `<button class="chip ${pen.autoShape ? "on" : ""}" id="autoShape" title="Gerade Striche und Pfeile automatisch sauber machen">📐 Auto-Form</button>` : ""}
+    ${
+      pen.kind === "eraser"
+        ? `<span class="divider"></span><button class="chip ${pen.eraseMode === "stroke" ? "on" : ""}" data-erase="stroke">Ganze Striche</button><button class="chip ${pen.eraseMode === "pixel" ? "on" : ""}" data-erase="pixel">Genau radieren</button>`
+        : ""
+    }
     ${pen.kind === "shape" ? `<span class="divider"></span>${SHAPES.map(([k, l]) => `<button class="chip ${pen.shape === k ? "on" : ""}" data-shape="${k}">${l}</button>`).join("")}` : ""}
     ${
       pen.kind === "lasso"
-        ? `<span class="hint">Striche einkreisen → 🗑 Löschen tippen oder die Auswahl verschieben.</span>`
+        ? `<span class="hint">Gemaltes einkreisen, dann die Auswahl an die neue Stelle ziehen. Gelöscht wird hier nichts.</span>`
         : `<span class="divider"></span>
       <span title="Dicke">Dicke</span>
-      <input type="range" id="penWidth" min="1" max="${pen.kind === "marker" || pen.kind === "eraser" ? 40 : 12}" value="${pen.width}">
+      ${pen.kind === "eraser" && pen.eraseMode === "stroke" ? "" : `<input type="range" id="penWidth" min="1" max="${pen.kind === "marker" || pen.kind === "eraser" ? 40 : 12}" value="${pen.width}">`}
       <span class="width-dot" id="widthDot"></span>
       ${
         usesColor
@@ -2557,6 +2563,18 @@ function renderPenBar(bar) {
         pen.customColor = false;
         pen.width = { pen: 3, marker: 16, eraser: 20, shape: 3 }[pen.kind] || 3;
         clearLasso();
+        renderSubbar();
+      })
+  );
+  $("#autoShape", bar)?.addEventListener("click", () => {
+    pen.autoShape = !pen.autoShape;
+    localStorage.setItem("nh-autoshape", pen.autoShape ? "1" : "0");
+    renderSubbar();
+  });
+  $$("[data-erase]", bar).forEach(
+    (b) =>
+      (b.onclick = () => {
+        pen.eraseMode = b.dataset.erase;
         renderSubbar();
       })
   );
@@ -2659,6 +2677,7 @@ function setupCanvas() {
   let current = null;
   let lassoPath = null;
   let moving = null;
+  let erasing = false;
   let sawPen = false;
   const pointFrom = (e) => {
     const rect = sheetEl.getBoundingClientRect();
@@ -2667,15 +2686,6 @@ function setupCanvas() {
   };
   const ctx = () => canvasEl.getContext("2d");
 
-  $("#lassoBar [data-l=delete]").addEventListener("pointerdown", (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!lasso) return;
-    const doc = currentDoc();
-    doc.strokes = doc.strokes.filter((_, i) => !lasso.idx.includes(i));
-    clearLasso();
-    touchDoc();
-  });
 
   canvasEl.addEventListener("pointerdown", (e) => {
     if (ui.tool !== "pen") return;
@@ -2700,6 +2710,11 @@ function setupCanvas() {
       current = { kind: "shape", shape, color, width, points: [pt, pt] };
       return;
     }
+    if (kind === "eraser" && ui.pen.eraseMode === "stroke") {
+      erasing = true;
+      eraseAt(pt);
+      return;
+    }
     current = { kind, color: kind === "eraser" ? "#000" : color, width, points: [pt] };
     drawStroke(ctx(), current, sheetEl.clientWidth);
   });
@@ -2721,6 +2736,7 @@ function setupCanvas() {
       c.restore();
       return;
     }
+    if (erasing) return eraseAt(pt);
     if (moving) {
       const dx = pt[0] - moving.start[0];
       const dy = pt[1] - moving.start[1];
@@ -2756,6 +2772,11 @@ function setupCanvas() {
       redrawCanvas();
       return;
     }
+    if (erasing) {
+      erasing = false;
+      touchDoc();
+      return;
+    }
     if (moving) {
       moving = null;
       showLassoBar();
@@ -2764,13 +2785,122 @@ function setupCanvas() {
     }
     if (!current) return;
     const [a, b] = [current.points[0], current.points[current.points.length - 1]];
-    if (current.kind !== "shape" || Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.005) currentDoc().strokes.push(current);
+    if (current.kind === "pen" && ui.pen.autoShape) {
+      // Gerade Striche & Pfeile automatisch sauber machen (läuft komplett auf dem Gerät)
+      const strokes = currentDoc().strokes;
+      const res = recognizeShape(current, strokes[strokes.length - 1]);
+      if (res?.replacePrev) strokes.pop();
+      if (res) current = res.stroke;
+      if (res?.drop) current = null;
+    }
+    if (current && (current.kind !== "shape" || Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.005)) currentDoc().strokes.push(current);
     current = null;
     redrawCanvas();
     touchDoc();
   };
   canvasEl.addEventListener("pointerup", end);
   canvasEl.addEventListener("pointercancel", end);
+}
+
+// Ganze Striche entfernen, die der Radiergummi berührt
+function eraseAt(pt) {
+  const doc = currentDoc();
+  const r = 10 / SHEET_BASE_WIDTH;
+  const before = doc.strokes.length;
+  doc.strokes = doc.strokes.filter((s) => {
+    const pts = strokeOutline(s);
+    if (pts.length === 1) return Math.hypot(pts[0][0] - pt[0], pts[0][1] - pt[1]) > r + s.width / SHEET_BASE_WIDTH / 2;
+    for (let i = 1; i < pts.length; i++) if (segDist(pt, pts[i - 1], pts[i]) <= r + s.width / SHEET_BASE_WIDTH / 2) return false;
+    return true;
+  });
+  if (doc.strokes.length !== before) redrawCanvas();
+}
+
+function segDist([px, py], [ax, ay], [bx, by]) {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const t = dx || dy ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy))) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+// Umriss einer Form als Linienzug (für Radiergummi)
+function strokeOutline(s) {
+  if (s.kind !== "shape") return s.points;
+  const [[x1, y1], [x2, y2]] = s.points;
+  if (s.shape === "rect") return [[x1, y1], [x2, y1], [x2, y2], [x1, y2], [x1, y1]];
+  if (s.shape === "triangle") return [[(x1 + x2) / 2, y1], [x2, y2], [x1, y2], [(x1 + x2) / 2, y1]];
+  if (s.shape === "ellipse") {
+    const cx = (x1 + x2) / 2;
+    const cy = (y1 + y2) / 2;
+    return Array.from({ length: 33 }, (_, i) => [cx + (Math.abs(x2 - x1) / 2) * Math.cos((i / 32) * 2 * Math.PI), cy + (Math.abs(y2 - y1) / 2) * Math.sin((i / 32) * 2 * Math.PI)]);
+  }
+  return [[x1, y1], [x2, y2]];
+}
+
+// Linienzug vereinfachen (Ramer-Douglas-Peucker)
+function simplify(pts, eps) {
+  if (pts.length < 3) return pts;
+  let max = 0;
+  let idx = 0;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const d = segDist(pts[i], pts[0], pts[pts.length - 1]);
+    if (d > max) {
+      max = d;
+      idx = i;
+    }
+  }
+  if (max <= eps) return [pts[0], pts[pts.length - 1]];
+  return [...simplify(pts.slice(0, idx + 1), eps).slice(0, -1), ...simplify(pts.slice(idx), eps)];
+}
+
+const angleAt = (a, b, c) => {
+  const v1 = [a[0] - b[0], a[1] - b[1]];
+  const v2 = [c[0] - b[0], c[1] - b[1]];
+  return (Math.acos(Math.max(-1, Math.min(1, (v1[0] * v2[0] + v1[1] * v2[1]) / (Math.hypot(...v1) * Math.hypot(...v2) || 1)))) * 180) / Math.PI;
+};
+
+// Erkennt gerade Striche und Pfeile. Kurze Striche (Buchstaben) bleiben, wie sie sind.
+function recognizeShape(stroke, prev) {
+  const W = SHEET_BASE_WIDTH;
+  const pts = stroke.points.map(([x, y]) => [x * W, y * W]);
+  if (pts.length < 3) return null;
+  let len = 0;
+  for (let i = 1; i < pts.length; i++) len += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  const a = pts[0];
+  const b = pts[pts.length - 1];
+  const chord = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const norm = (p) => [p[0] / W, p[1] / W];
+  const asShape = (shape, p1, p2) => ({ kind: "shape", shape, color: stroke.color, width: stroke.width, points: [norm(p1), norm(p2)] });
+
+  // 1) Gerader Strich
+  if (chord >= 40 && chord / len > 0.92 && Math.max(...pts.map((p) => segDist(p, a, b))) < Math.max(5, chord * 0.06)) {
+    return { stroke: asShape("line", a, b) };
+  }
+
+  const v = simplify(pts, Math.max(5, len * 0.04));
+  // 2) Pfeil in einem Zug: langer Schaft, danach kurze Spitze, die zurück zeigt
+  if (v.length >= 3 && v.length <= 5) {
+    const [A, B, C] = v;
+    const shaft = Math.hypot(B[0] - A[0], B[1] - A[1]);
+    const nearHead = v.slice(2).every((p) => Math.hypot(p[0] - B[0], p[1] - B[1]) < shaft * 0.5);
+    if (shaft >= 45 && shaft >= len * 0.5 && nearHead && angleAt(A, B, C) < 75) return { stroke: asShape("arrow", A, B) };
+  }
+
+  // 3) Spitze nachträglich gemalt: kurzes „V“ am Ende einer geraden Linie
+  if (v.length === 3 && prev?.kind === "shape" && prev.shape === "line") {
+    const [P, Q, R] = v;
+    const arms = [Math.hypot(P[0] - Q[0], P[1] - Q[1]), Math.hypot(R[0] - Q[0], R[1] - Q[1])];
+    const [l1, l2] = prev.points.map(([x, y]) => [x * W, y * W]);
+    if (arms.every((d) => d > 6 && d < 70) && angleAt(P, Q, R) < 120) {
+      for (const [tip, tail] of [[l2, l1], [l1, l2]]) {
+        // Spitze am Linienende, Schenkel zeigen zurück Richtung Linie
+        if (Math.hypot(Q[0] - tip[0], Q[1] - tip[1]) < 25 && angleAt(tail, tip, [(P[0] + R[0]) / 2, (P[1] + R[1]) / 2]) < 60) {
+          return { stroke: { ...prev, shape: "arrow", points: [norm(tail), norm(tip)] }, replacePrev: true };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function resizeCanvas(force = false) {
