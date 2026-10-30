@@ -1,5 +1,5 @@
 // Notizheft – Uni-Notizen im Pages-Stil, optimiert fürs Schreiben mit der Tastatur.
-// Alle Daten liegen lokal im Browser (IndexedDB). Die KI-Funktionen laufen über /api/* auf dem Server.
+// Alle Daten liegen lokal im Browser (IndexedDB). Alles ist kostenlos: Rechtschreibung über LanguageTool, Texterkennung über Tesseract.
 
 // ============================================================
 // Hilfsfunktionen
@@ -46,21 +46,6 @@ function toast(text, type = "", ms = 2600) {
   $("#toasts").appendChild(el);
   setTimeout(() => el.remove(), ms);
   return el;
-}
-
-async function api(path, body) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (res.status === 401) {
-    location.reload(); // Anmeldung abgelaufen → Passwortseite
-    throw new Error("Bitte erneut anmelden.");
-  }
-  const data = await res.json().catch(() => ({ error: "Ungültige Antwort vom Server" }));
-  if (!res.ok) throw new Error(data.error || "Fehler bei der KI-Anfrage");
-  return data;
 }
 
 function download(name, content, type) {
@@ -182,7 +167,7 @@ function nextSemesterName(name) {
 }
 
 function defaultState() {
-  const sem = { id: uid(), name: semesterName(new Date()), timetable: { images: [], chat: [] } };
+  const sem = { id: uid(), name: semesterName(new Date()), timetable: { images: [] } };
   return {
     version: 1,
     settings: { font: "Arial", fontSize: 12, paper: "lined" },
@@ -202,7 +187,7 @@ const ui = {
   docId: null,
   tool: "text",
   pen: { kind: "pen", color: PEN_COLORS[0], width: 3 },
-  panel: null, // chat | task
+  panel: null, // task | design
   sort: localStorage.getItem("nh-sort") || "updated",
   layout: localStorage.getItem("nh-layout") || "grid",
   search: "",
@@ -260,7 +245,6 @@ function createDoc({ moduleId = null, folderId = null, kind = "notes", paper, ti
     declinedSig: "",
     design: {},
     task: "",
-    chat: [],
     createdAt: now,
     updatedAt: now,
   };
@@ -270,7 +254,7 @@ function createDoc({ moduleId = null, folderId = null, kind = "notes", paper, ti
 }
 
 // ============================================================
-// HTML säubern (für KI-Antworten, Import, Einfügen)
+// HTML säubern (für Import und Einfügen)
 // ============================================================
 
 const ALLOWED_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "UL", "OL", "LI", "B", "STRONG", "I", "EM", "U", "BR", "SPAN"]);
@@ -304,11 +288,13 @@ function cleanNode(node) {
     const fontSize = child.style?.fontSize;
     const isTerm = child.classList?.contains("term");
     const bid = child.getAttribute("data-bid");
+    const toc = child.getAttribute("data-toc");
     for (const attr of [...child.attributes]) child.removeAttribute(attr.name);
     if (isTerm) child.className = "term";
     if (color) child.style.color = color;
     if (fontSize && /^\d+(\.\d+)?(pt|px)$/.test(fontSize)) child.style.fontSize = fontSize;
     if (bid) child.setAttribute("data-bid", bid);
+    if (toc) child.setAttribute("data-toc", toc);
   }
 }
 
@@ -346,7 +332,7 @@ async function newSemester() {
   if (!name) return renderSemesterSelect();
   const existing = state.semesters.find((s) => s.name.toLowerCase() === name.toLowerCase());
   if (existing) return switchSemester(existing.id);
-  const sem = { id: uid(), name, timetable: { images: [], chat: [] } };
+  const sem = { id: uid(), name, timetable: { images: [] } };
   state.semesters.push(sem);
   await switchSemester(sem.id);
 }
@@ -476,7 +462,9 @@ function openModal(html, { wide = false } = {}) {
       modalClose = null;
       resolve(value);
     };
-    bd.onclick = (e) => e.target === bd && modalClose(null);
+    bd.onclick = (e) => {
+      if (e.target === bd) modalClose(null);
+    };
     modal.close = modalClose;
     (modal.querySelector("[autofocus]") || modal.querySelector("input, button"))?.focus();
     modal.dispatchEvent(new CustomEvent("mount"));
@@ -957,7 +945,6 @@ function renderEditor(main) {
     <div class="editor-wrap">
       <div class="toolbar">
         <button class="tb" data-a="back" title="Zur Dateiübersicht">‹ Dateien</button>
-        <span class="kind-pill">${KINDS[doc.kind].ico} ${esc(KINDS[doc.kind].label)} · ${esc(moduleName(doc.moduleId))}</span>
         <div class="grow"></div>
         <div class="seg" id="modeSeg" title="Modus">
           <button data-mode="notes">📝 Mitschrift</button>
@@ -970,7 +957,8 @@ function renderEditor(main) {
         <select class="input" id="paperSel" style="width:auto" title="Blatt">${Object.entries(PAPERS)
           .map(([k, v]) => `<option value="${k}">${v}</option>`)
           .join("")}</select>
-        <button class="tb" data-a="chat" title="Chatbot (${MOD}+K)">💬 Chatbot</button>
+        <button class="tb" data-a="tidy" title="Rechtschreibung prüfen & aufräumen">✨ Aufräumen</button>
+        <button class="tb" data-a="design" title="Design">🎨 Design</button>
         <button class="tb" data-a="export" title="Exportieren">⤓ Export</button>
         <span class="saved-state" id="savedState"></span>
         <button class="btn primary" data-a="save" title="Speichern (${MOD}+S)">Speichern</button>
@@ -980,7 +968,7 @@ function renderEditor(main) {
         <div class="canvas-scroll" id="canvasScroll">
           <div class="sheet" id="sheet">
             <div class="sheet-head">
-              <div class="module-tag">${esc(mod ? mod.name : "Sonstiges")}${mod?.examType ? ` · ${esc(mod.examType)}` : ""}</div>
+              <div class="module-tag">${KINDS[doc.kind].ico} ${esc(mod ? mod.name : "Sonstiges")}${mod?.examType ? ` · ${esc(mod.examType)}` : ""}</div>
               <div class="sheet-date">${esc(fmtLong(Date.now()))}${
                 sameDay(doc.createdAt, Date.now()) ? "" : `<small>Erstellt am ${esc(fmtShort(doc.createdAt))}</small>`
               }</div>
@@ -1451,7 +1439,7 @@ async function saveDoc({ ask = true } = {}) {
   }
   const yes = await confirmModal(
     "Gespeichert ✓ – jetzt verbessern?",
-    `Soll ich die ${changed.length === 1 ? "bearbeitete Stelle" : `${changed.length} bearbeiteten Stellen`} verbessern? Rechtschreibung wird korrigiert, Erklärungen werden präzisiert und Fachbegriffe erklärt. Nur Bearbeitetes wird angefasst.`,
+    `Soll ich die ${changed.length === 1 ? "bearbeitete Stelle" : `${changed.length} bearbeiteten Stellen`} verbessern? Rechtschreibung & Grammatik werden geprüft und die Formatierung wird aufgeräumt – kostenlos. Nur Bearbeitetes wird angefasst.`,
     "Ja, verbessern",
     { cancelLabel: "Nein, so lassen" }
   );
@@ -1461,96 +1449,351 @@ async function saveDoc({ ask = true } = {}) {
     updateSavedState();
     return;
   }
-  await improveDoc(changed);
+  await improveBlocks(changed, { spelling: true, tidy: true });
 }
 
-async function improveDoc(changed) {
+// „Aufräumen“-Knopf: ganzes Blatt, mit Auswahl was passieren soll
+async function tidyDialog() {
   const doc = currentDoc();
-  const terms = termsInDoc().filter((t) => !doc.glossary[t.toLowerCase()]);
-  const busy = toast("✨ Verbessere …", "", 120000);
-  const saveBtn = $("[data-a=save]");
-  if (saveBtn) saveBtn.disabled = true;
-  try {
-    const res = await api("/api/improve", {
-      moduleName: moduleName(doc.moduleId),
-      blocks: changed.map((el) => ({ id: el.dataset.bid, html: el.outerHTML.replace(/\sdata-bid="[^"]*"/g, "") })),
-      terms,
-    });
-    if (ui.docId !== doc.id) throw new Error("Blatt wurde gewechselt.");
-    let count = 0;
-    for (const { id, html } of res.blocks || []) {
-      const el = editorEl.querySelector(`:scope > [data-bid="${CSS.escape(id)}"]`);
-      if (!el) continue;
-      const box = document.createElement("div");
-      box.innerHTML = sanitizeHtml(html);
-      const replacement = box.children.length === 1 && /^(P|H1|H2|H3|UL|OL)$/.test(box.firstElementChild.tagName) ? box.firstElementChild : null;
-      if (replacement) el.replaceWith(replacement);
-      else el.innerHTML = box.innerHTML;
-      const target = replacement || el;
-      target.dataset.bid = id;
-      count++;
+  if (doc.kind === "block") return toast("Collegeblöcke werden nicht verarbeitet.");
+  normalizeBlocks();
+  const headings = $$(":scope > h1, :scope > h2", editorEl).length;
+  const p = openModal(`
+    <h3>✨ Blatt aufräumen</h3>
+    <p class="lead">Macht das ganze Blatt ordentlicher – komplett kostenlos.</p>
+    <label class="check-row"><input type="checkbox" id="tdSpell" checked> <span><b>Rechtschreibung &amp; Grammatik prüfen</b><small>Du siehst jede Korrektur vorher und kannst sie abwählen.</small></span></label>
+    <label class="check-row"><input type="checkbox" id="tdTidy" checked> <span><b>Formatierung aufräumen</b><small>Doppelte Leerzeichen, Satzanfänge groß, „Anführungszeichen“, → Pfeile, Zeilen mit „-“ werden zu Listen, leere Zeilen weg.</small></span></label>
+    <label class="check-row"><input type="checkbox" id="tdToc" ${headings >= 2 ? "" : "disabled"}> <span><b>Inhaltsübersicht oben einfügen</b><small>${
+      headings >= 2 ? `Aus deinen ${headings} Überschriften.` : "Braucht mindestens 2 Überschriften."
+    }</small></span></label>
+    <div class="modal-actions"><button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Aufräumen</button></div>`);
+  const m = openModal.lastModal;
+  $("[data-x]", m).onclick = () => m.close(null);
+  $("[data-ok]", m).onclick = () => m.close({ spelling: $("#tdSpell", m).checked, tidy: $("#tdTidy", m).checked, toc: $("#tdToc", m).checked });
+  const opts = await p;
+  if (opts) await improveBlocks([...editorEl.children], opts);
+}
+
+async function improveBlocks(blocks, { spelling = true, tidy = true, toc = false } = {}) {
+  const doc = currentDoc();
+  normalizeBlocks();
+  let matches = [];
+  let spellFailed = false;
+  if (spelling) {
+    const busy = toast("Prüfe Rechtschreibung …", "", 60000);
+    try {
+      matches = await checkSpelling(textUnits(blocks));
+    } catch {
+      spellFailed = true;
+    } finally {
+      busy.remove();
     }
-    mergeGlossary(res.glossary);
-    normalizeBlocks();
-    for (const el of changed) {
-      const now = editorEl.querySelector(`:scope > [data-bid="${CSS.escape(el.dataset.bid)}"]`);
-      if (now) doc.improved[now.dataset.bid] = blockHash(now);
-    }
-    doc.html = editorEl.innerHTML;
+  }
+  let chosen = [];
+  if (matches.length) {
+    chosen = await reviewCorrections(matches);
+    if (chosen === null) return;
+  }
+  applyCorrections(chosen);
+  const tidied = tidy ? tidyBlocks(blocks) : 0;
+  if (toc) insertToc();
+  normalizeBlocks();
+  if (!spellFailed) {
+    // Danach gilt das ganze Blatt als verbessert – gefragt wird erst nach der nächsten Änderung
+    for (const el of editorEl.children) doc.improved[el.dataset.bid] = blockHash(el);
     doc.declinedSig = "";
-    await writeState();
-    renderGlossary();
-    updateSavedState();
-    toast(`✨ ${count} Stelle(n) verbessert`);
-  } catch (err) {
-    toast(err.message, "error", 5000);
-  } finally {
-    busy.remove();
-    if (saveBtn) saveBtn.disabled = false;
+  }
+  doc.html = editorEl.innerHTML;
+  doc.updatedAt = Date.now();
+  await writeState();
+  renderGlossary();
+  resizeCanvas();
+  updateSavedState();
+  if (spellFailed) toast("Rechtschreibprüfung gerade nicht erreichbar (Internet?) – nur aufgeräumt.", "error", 5000);
+  else if (!chosen.length && !tidied && !toc) toast("Alles sauber ✓");
+  else toast(`✨ ${[chosen.length ? `${chosen.length} Korrektur(en)` : "", tidied ? `${tidied} Stelle(n) aufgeräumt` : "", toc ? "Übersicht eingefügt" : ""].filter(Boolean).join(" · ")}`);
+}
+
+// Zerlegt Blöcke in Texteinheiten: Absatz, Überschrift oder einzelner Listenpunkt
+function textUnits(blocks) {
+  const els = [];
+  for (const b of blocks) {
+    if (!b.isConnected) continue;
+    if (/^(UL|OL)$/.test(b.tagName)) els.push(...b.querySelectorAll("li"));
+    else els.push(b);
+  }
+  return els.map((el) => {
+    const nodes = [];
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      const n = walker.currentNode;
+      if (el.tagName !== "LI" || n.parentElement.closest("li") === el) nodes.push(n);
+    }
+    return { el, nodes, text: nodes.map((n) => n.data).join("") };
+  });
+}
+
+// Kostenlose Prüfung über LanguageTool (öffentlicher Dienst, keine Anmeldung)
+async function checkSpelling(units) {
+  const SEP = "\n\n";
+  const found = [];
+  let batch = [];
+  let size = 0;
+  const flush = async () => {
+    if (!batch.length) return;
+    const text = batch.map((u) => u.text).join(SEP);
+    const res = await fetch("https://api.languagetool.org/v2/check", {
+      method: "POST",
+      body: new URLSearchParams({ text, language: "de-DE" }),
+    });
+    if (!res.ok) throw new Error("LanguageTool nicht erreichbar");
+    const data = await res.json();
+    let offset = 0;
+    const starts = batch.map((u) => {
+      const s = offset;
+      offset += u.text.length + SEP.length;
+      return s;
+    });
+    for (const m of data.matches || []) {
+      if (!m.replacements?.length) continue;
+      let i = starts.length - 1;
+      while (i > 0 && starts[i] > m.offset) i--;
+      const unit = batch[i];
+      const start = m.offset - starts[i];
+      const end = start + m.length;
+      if (end > unit.text.length) continue;
+      found.push({ unit, start, end, original: unit.text.slice(start, end), replacement: m.replacements[0].value, message: m.shortMessage || m.message });
+    }
+    batch = [];
+    size = 0;
+  };
+  for (const u of units) {
+    if (!u.text.trim()) continue;
+    if (size + u.text.length > 15000) await flush();
+    batch.push(u);
+    size += u.text.length + SEP.length;
+  }
+  await flush();
+  // Rot markierte Fachbegriffe nie „korrigieren“
+  return found.filter((m) => {
+    const loc = locateText(m.unit, m.start, m.end);
+    return loc && !loc.node.parentElement.closest("span.term");
+  });
+}
+
+function locateText(unit, start, end) {
+  let pos = 0;
+  for (const node of unit.nodes) {
+    const len = node.data.length;
+    if (start >= pos && end <= pos + len) return { node, offset: start - pos };
+    pos += len;
+  }
+  return null;
+}
+
+function reviewCorrections(matches) {
+  const snippet = (m) => {
+    const t = m.unit.text;
+    const from = Math.max(0, m.start - 25);
+    const to = Math.min(t.length, m.end + 25);
+    return `${from ? "…" : ""}${esc(t.slice(from, m.start))}<mark>${esc(m.original)}</mark>${esc(t.slice(m.end, to))}${to < t.length ? "…" : ""}`;
+  };
+  const p = openModal(
+    `
+    <h3>Korrekturvorschläge (${matches.length})</h3>
+    <p class="lead">Abwählen, was nicht geändert werden soll.</p>
+    <div class="corr-list">${matches
+      .map(
+        (m, i) => `<label class="check-row"><input type="checkbox" data-i="${i}" checked>
+        <span><b><s>${esc(m.original) || "␣"}</s> → ${esc(m.replacement) || "(löschen)"}</b><small>${esc(m.message)}</small><small class="ctx">${snippet(m)}</small></span></label>`
+      )
+      .join("")}</div>
+    <div class="modal-actions"><button class="btn left" data-none>Keine</button><button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Übernehmen</button></div>`,
+    { wide: true }
+  );
+  const m = openModal.lastModal;
+  $("[data-none]", m).onclick = () => $$("[data-i]", m).forEach((c) => (c.checked = false));
+  $("[data-x]", m).onclick = () => m.close(null);
+  $("[data-ok]", m).onclick = () => m.close($$("[data-i]", m).filter((c) => c.checked).map((c) => matches[Number(c.dataset.i)]));
+  return p;
+}
+
+function applyCorrections(chosen) {
+  // Pro Texteinheit von hinten nach vorne, damit die Positionen stimmen
+  const byUnit = new Map();
+  for (const m of chosen) byUnit.set(m.unit, [...(byUnit.get(m.unit) || []), m]);
+  for (const [unit, list] of byUnit) {
+    for (const m of list.sort((a, b) => b.start - a.start)) {
+      const loc = locateText(unit, m.start, m.end);
+      if (!loc) continue;
+      const d = loc.node.data;
+      loc.node.data = d.slice(0, loc.offset) + m.replacement + d.slice(loc.offset + m.end - m.start);
+    }
   }
 }
 
-function mergeGlossary(list = []) {
-  const doc = currentDoc();
-  for (const { term, explanation } of list) {
-    if (term && explanation) doc.glossary[term.toLowerCase()] = { term, explanation };
+const tidyString = (s) =>
+  s
+    .replace(/(\S)[ \u00a0]{2,}/g, "$1 ")
+    .replace(/[ \u00a0]+([,.;:!?])/g, "$1")
+    .replace(/\.{3}/g, "…")
+    .replace(/<->/g, "↔")
+    .replace(/->/g, "→")
+    .replace(/=>/g, "⇒")
+    .replace(/<-/g, "←")
+    .replace(/"([^"\n]+)"/g, "„$1“");
+
+// Regelbasiertes Aufräumen – gibt zurück, wie viele Blöcke sich geändert haben
+function tidyBlocks(blocks) {
+  const bids = new Set(blocks.map((b) => b.dataset.bid));
+  const before = new Map([...editorEl.children].map((el) => [el.dataset.bid, el.innerHTML]));
+
+  for (const unit of textUnits(blocks)) {
+    for (const n of unit.nodes) {
+      const t = tidyString(n.data);
+      if (t !== n.data) n.data = t;
+    }
+    if (unit.nodes.length) {
+      const first = unit.nodes.find((n) => n.data.trim());
+      if (first) first.data = first.data.replace(/^\s+/, "");
+      const last = unit.nodes[unit.nodes.length - 1];
+      last.data = last.data.replace(/\s+$/, "");
+      if (first && /^(P|H1|H2|H3)$/.test(unit.el.tagName)) first.data = first.data.replace(/^\p{Ll}/u, (c) => c.toUpperCase());
+    }
   }
+
+  const els = () => [...editorEl.children].filter((el) => bids.has(el.dataset.bid));
+  // Zeilen mit „- “ / „• “ / „1. “ werden zu echten Listen
+  const listType = (el) => {
+    if (el.tagName !== "P") return null;
+    const t = el.textContent;
+    if (/^\s*[-–•*]\s+\S/.test(t)) return "ul";
+    if (/^\s*\d+[.)]\s+\S/.test(t)) return "ol";
+    return null;
+  };
+  let list = null;
+  for (const el of els()) {
+    const type = listType(el);
+    if (!type) {
+      list = null;
+      continue;
+    }
+    const firstText = document.createTreeWalker(el, NodeFilter.SHOW_TEXT).nextNode();
+    if (firstText) firstText.data = firstText.data.replace(/^\s*(?:[-–•*]|\d+[.)])\s+/, "");
+    const li = document.createElement("li");
+    li.append(...el.childNodes);
+    if (list && list.tagName.toLowerCase() === type && list.nextElementSibling === el) {
+      list.appendChild(li);
+      el.remove();
+    } else {
+      list = document.createElement(type);
+      list.dataset.bid = el.dataset.bid;
+      list.appendChild(li);
+      el.replaceWith(list);
+    }
+  }
+  // Kurze Zeile mit „:“ direkt vor einer Liste wird zur Zwischenüberschrift
+  for (const el of els()) {
+    const t = el.textContent.trim();
+    const next = el.nextElementSibling;
+    if (el.tagName === "P" && /:$/.test(t) && t.length <= 60 && !/[.!?]\s/.test(t) && next && /^(UL|OL)$/.test(next.tagName) && !el.querySelector("b, strong")) {
+      const h = document.createElement("h3");
+      h.textContent = t.replace(/:$/, "");
+      h.dataset.bid = el.dataset.bid;
+      el.replaceWith(h);
+    }
+  }
+  // Mehrere leere Zeilen hintereinander → eine
+  for (const el of [...editorEl.children]) {
+    const empty = (x) => x && x.tagName === "P" && !x.textContent.trim() && !x.querySelector("span");
+    if (empty(el) && (empty(el.previousElementSibling) || !el.nextElementSibling)) el.remove();
+  }
+
+  let changed = 0;
+  for (const el of editorEl.children) if (before.get(el.dataset.bid) !== el.innerHTML) changed++;
+  return changed;
 }
 
-// Fachbegriffe stehen auf jedem Blatt unten nochmal mit Erklärung
+function insertToc() {
+  $$("[data-toc]", editorEl).forEach((el) => el.remove());
+  const heads = $$(":scope > h1, :scope > h2", editorEl).filter((h) => h.textContent.trim());
+  if (heads.length < 2) return;
+  const title = document.createElement("h3");
+  title.textContent = "Inhalt";
+  title.dataset.toc = "1";
+  const ul = document.createElement("ul");
+  ul.dataset.toc = "1";
+  for (const h of heads) {
+    const li = document.createElement("li");
+    li.textContent = h.textContent.trim();
+    if (h.tagName === "H2") li.style.marginLeft = "18px";
+    ul.appendChild(li);
+  }
+  editorEl.prepend(title, ul);
+}
+
+// ---------- Fachbegriffe ----------
+
+// Seriöse Nachschlagewerke statt automatischer Texte
+const TERM_SOURCES = [
+  ["Duden", (t) => `https://www.duden.de/suchen/dudenonline/${encodeURIComponent(t)}`],
+  ["DWDS", (t) => `https://www.dwds.de/wb/${encodeURIComponent(t)}`],
+  ["Gabler", (t) => `https://www.google.com/search?q=${encodeURIComponent(t + " site:wirtschaftslexikon.gabler.de")}`],
+  ["Spektrum", (t) => `https://www.google.com/search?q=${encodeURIComponent(t + " site:spektrum.de/lexikon")}`],
+  ["bpb", (t) => `https://www.google.com/search?q=${encodeURIComponent(t + " site:bpb.de")}`],
+  ["Scholar", (t) => `https://scholar.google.de/scholar?q=${encodeURIComponent(t)}`],
+  ["Wikipedia", (t) => `https://de.wikipedia.org/w/index.php?search=${encodeURIComponent(t)}`],
+];
+
+// Gleicher Begriff schon in einem anderen Blatt erklärt? Dann übernehmen.
+function findExplanation(key, doc) {
+  const others = semDocs()
+    .filter((d) => d.id !== doc.id && d.glossary?.[key]?.explanation)
+    .sort((a, b) => (b.moduleId === doc.moduleId) - (a.moduleId === doc.moduleId) || b.updatedAt - a.updatedAt);
+  return others[0] ? { explanation: others[0].glossary[key].explanation, from: others[0].title } : null;
+}
+
 function renderGlossary() {
   const box = $("#glossary");
   if (!box) return;
   const doc = currentDoc();
-  const terms = termsInDoc();
+  const terms = termsInDoc().sort((a, b) => a.localeCompare(b, "de"));
   if (!terms.length) {
     box.hidden = true;
     return;
   }
   box.hidden = false;
-  const missing = terms.filter((t) => !doc.glossary[t.toLowerCase()]);
+  if ($(".gl-text:focus", box)) return; // nicht beim Tippen neu aufbauen
+  for (const t of terms) {
+    const key = t.toLowerCase();
+    if (!doc.glossary[key]?.explanation) {
+      const other = findExplanation(key, doc);
+      if (other) doc.glossary[key] = { term: t, ...other };
+    }
+  }
   box.innerHTML = `
     <h4>Fachbegriffe</h4>
     <dl>${terms
       .map((t) => {
         const g = doc.glossary[t.toLowerCase()];
-        return `<dt class="term-name">${esc(t)}</dt><dd class="${g ? "" : "pending"}">${
-          g ? esc(g.explanation) : doc.kind === "block" ? "–" : "Erklärung folgt beim Verbessern"
-        }</dd>`;
+        return `<dt class="term-name">${esc(t)}</dt><dd>
+          <div class="gl-text" contenteditable="true" spellcheck="true" lang="de" data-key="${esc(t.toLowerCase())}" data-term="${esc(t)}" data-placeholder="Erklärung eintippen …">${esc(g?.explanation || "")}</div>
+          <div class="gl-meta">${g?.from ? `<span>aus „${esc(g.from)}“ übernommen · </span>` : ""}nachschlagen: ${TERM_SOURCES.map(
+            ([name, url]) => `<a href="${esc(url(t))}" target="_blank" rel="noopener">${name}</a>`
+          ).join(" · ")}</div></dd>`;
       })
-      .join("")}</dl>
-    ${missing.length && doc.kind !== "block" ? `<div class="gl-actions"><button id="explainNow">Jetzt erklären</button></div>` : ""}`;
-  $("#explainNow", box)?.addEventListener("click", async (e) => {
-    e.target.disabled = true;
-    e.target.textContent = "Erkläre …";
-    try {
-      const res = await api("/api/glossary", { moduleName: moduleName(doc.moduleId), terms: missing, context: editorEl.innerText });
-      mergeGlossary(res.glossary);
+      .join("")}</dl>`;
+  $$(".gl-text", box).forEach((el) => {
+    el.addEventListener("input", () => {
+      doc.glossary[el.dataset.key] = { term: el.dataset.term, explanation: el.innerText.trim() };
+      doc.updatedAt = Date.now();
       persist();
-    } catch (err) {
-      toast(err.message, "error", 5000);
-    }
-    renderGlossary();
+    });
+    el.addEventListener("paste", (e) => {
+      e.preventDefault();
+      document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
+    });
+    el.addEventListener("keydown", (e) => e.key === "Enter" && (e.preventDefault(), el.blur()));
   });
 }
 
@@ -1560,8 +1803,9 @@ async function toolbarAction(a) {
     renderAll();
   }
   if (a === "save") saveDoc({ ask: true });
-  if (a === "chat") {
-    ui.panel = ui.panel === "chat" ? (currentDoc().mode === "task" ? "task" : null) : "chat";
+  if (a === "tidy") tidyDialog();
+  if (a === "design") {
+    ui.panel = ui.panel === "design" ? (currentDoc().mode === "task" ? "task" : null) : "design";
     renderSidePanel();
   }
   if (a === "export") {
@@ -1711,271 +1955,306 @@ function renderStrokesToDataUrl(doc) {
   return { url: c.toDataURL("image/png"), height: c.height / 2 };
 }
 
-// ---------- Rechte Seitenleiste: Chatbot & Aufgaben-Modus ----------
+// ---------- Rechte Seitenleiste: Aufgaben-Vorlagen & Design ----------
+
+// Typische Antwortformen in Seminaren – jeweils als Schablone zum Ausfüllen
+const ANSWER_FORMS = {
+  bullets: { label: "Stichpunkte", ico: "•", html: `<ul><li><br></li></ul>` },
+  text: { label: "Fließtext", ico: "¶", html: `<p><br></p>` },
+  definition: { label: "Definition", ico: "📖", html: `<p><b>Begriff:</b>&nbsp;</p><p><b>Definition:</b>&nbsp;</p><p><b>Merkmale:</b></p><ul><li><br></li></ul><p><b>Beispiel:</b>&nbsp;</p>` },
+  discussion: {
+    label: "Erörterung",
+    ico: "⚖️",
+    html: `<p><b>Fragestellung / These:</b>&nbsp;</p><p><b>Pro:</b></p><ul><li><br></li></ul><p><b>Contra:</b></p><ul><li><br></li></ul><p><b>Abwägung &amp; Fazit:</b>&nbsp;</p>`,
+  },
+  analysis: {
+    label: "Textanalyse",
+    ico: "🔍",
+    html: `<p><b>Autor:in, Titel, Jahr:</b>&nbsp;</p><p><b>Thema &amp; Kernaussage:</b>&nbsp;</p><p><b>Argumentation / Aufbau:</b></p><ul><li><br></li></ul><p><b>Eigene Einordnung:</b>&nbsp;</p>`,
+  },
+  comparison: {
+    label: "Vergleich",
+    ico: "↔️",
+    html: `<p><b>Vergleichskriterien:</b>&nbsp;</p><p><b>Gemeinsamkeiten:</b></p><ul><li><br></li></ul><p><b>Unterschiede:</b></p><ul><li><br></li></ul><p><b>Fazit:</b>&nbsp;</p>`,
+  },
+  opinion: {
+    label: "Stellungnahme",
+    ico: "💬",
+    html: `<p><b>Meine Position:</b>&nbsp;</p><p><b>Begründung:</b></p><ul><li><br></li></ul><p><b>Beleg / Beispiel:</b>&nbsp;</p><p><b>Fazit:</b>&nbsp;</p>`,
+  },
+  calc: { label: "Rechnung", ico: "🧮", html: `<p><b>Gegeben:</b>&nbsp;</p><p><b>Gesucht:</b>&nbsp;</p><p><b>Lösungsweg:</b></p><ul><li><br></li></ul><p><b>Ergebnis:</b>&nbsp;</p>` },
+};
+
+// Operatoren aus der Aufgabenstellung erkennen (wie in Seminaren & Klausuren üblich)
+const OPERATORS = [
+  [/\bnehmen sie stellung|stellung nehmen|\bbeurteil|\bbewert|\bpositionier/, "opinion", "Beurteilen / Stellung nehmen: ein eigenes, begründetes Urteil fällen."],
+  [/\berörter|\bdiskutier|setzen sie sich .*auseinander/, "discussion", "Erörtern: Pro und Contra abwägen und zu einem begründeten Fazit kommen."],
+  [/\bvergleich|gegenüberstell|\bgrenzen sie|\babgrenz/, "comparison", "Vergleichen: Gemeinsamkeiten und Unterschiede nach Kriterien herausarbeiten."],
+  [/\bdefinier|\bbegriff.*bestimm/, "definition", "Definieren: Begriff genau bestimmen und Merkmale nennen."],
+  [/\banalysier|\buntersuch|fassen sie .*zusammen|\bzusammenfass|arbeiten sie .*heraus|\bherausarbeit/, "analysis", "Analysieren: Text systematisch auf Aussage und Argumentation untersuchen."],
+  [/\bberechn|\bermittel|\brechnen sie/, "calc", "Berechnen: Lösungsweg nachvollziehbar darstellen."],
+  [/\bnenne|\bzählen sie|\baufzähl|\bliste|\bsammel|\bstichpunkt/, "bullets", "Nennen / Aufzählen: Aspekte knapp in Stichpunkten, ohne lange Erklärung."],
+  [/\berläuter|\berklär|\bbeschreib|stellen sie .*dar|\bdarstell|\binterpretier|\bbegründ/, "text", "Erläutern / Beschreiben: Zusammenhänge im Fließtext verständlich darstellen."],
+];
+
+function detectOperator(question) {
+  const q = (question || "").toLowerCase();
+  const hit = OPERATORS.find(([re]) => re.test(q));
+  return hit ? { form: hit[1], hint: hit[2] } : null;
+}
+
+const newTask = () => ({ question: "", form: "auto", subs: [] });
 
 function renderSidePanel() {
   const panel = $("#sidePanel");
   if (!panel) return;
   panel.hidden = !ui.panel;
-  $$("[data-a=chat]").forEach((b) => b.classList.toggle("on", ui.panel === "chat"));
+  $$("[data-a=design]").forEach((b) => b.classList.toggle("on", ui.panel === "design"));
   if (!ui.panel) return;
-  const doc = currentDoc();
-  if (ui.panel === "chat") {
-    panel.innerHTML = `<div class="panel-head">💬 Chatbot <button class="icon-btn" data-close>✕</button></div><div class="chat-box" style="flex:1;display:flex;flex-direction:column;min-height:0"></div>`;
-    mountChat($(".chat-box", panel), {
-      mode: "document",
-      history: doc.chat,
-      hints: ["Fehler korrigieren & glätten", "Übersichtlicher strukturieren", "Zusammenfassung ans Ende", "Design: dezent & modern", "Design: kariert, Akzent Blau"],
-      placeholder: "Was soll ich an der Datei ändern?",
-      payload: () => {
-        normalizeBlocks();
-        return { moduleName: moduleName(doc.moduleId), documentHtml: `<h1>${esc(doc.title)}</h1>` + stripBids(doc.html) };
-      },
-      onResult: documentChatResult,
-    });
-  } else {
-    panel.innerHTML = `
-      <div class="panel-head">✏️ Aufgaben-Modus <button class="icon-btn" data-close>✕</button></div>
-      <div class="panel-body" style="flex:0 0 auto;border-bottom:1px solid var(--border)">
-        <label class="field"><span>Aufgabe hier eingeben</span><textarea class="input" id="taskText" placeholder="z. B. Analysieren Sie … / Diskutieren Sie …">${esc(doc.task)}</textarea></label>
-        <div class="task-choice">
-          <button class="btn" data-t="ideas"><b>💡 Ideen vom Chatbot</b><small>Ansätze & Denkanstöße bekommen</small></button>
-          <button class="btn" data-t="solve"><b>🤖 Chatbot löst die Aufgabe</b><small>Kompletter Lösungsvorschlag</small></button>
-          <button class="btn" data-t="self"><b>✍️ Selbst machen</b><small>Aufgabe ins Blatt, weiter in Stichpunkten</small></button>
-        </div>
-      </div>
-      <div class="chat-box" style="flex:1;display:flex;flex-direction:column;min-height:0"></div>`;
-    const taskText = $("#taskText", panel);
-    taskText.oninput = () => {
-      doc.task = taskText.value;
-      persist();
-    };
-    const chat = mountChat($(".chat-box", panel), {
-      mode: "task",
-      history: (doc.taskChat ||= []),
-      hints: [],
-      placeholder: "Rückfrage zur Aufgabe …",
-      payload: () => ({ moduleName: moduleName(doc.moduleId), documentHtml: stripBids(doc.html).slice(0, 20000) }),
-      onResult: taskChatResult,
-    });
-    $$("[data-t]", panel).forEach(
-      (b) =>
-        (b.onclick = () => {
-          const task = taskText.value.trim();
-          if (!task) {
-            taskText.focus();
-            return toast("Gib zuerst die Aufgabe ein.");
-          }
-          if (b.dataset.t === "self") return startSelfMode(task);
-          chat.send(b.dataset.t === "ideas" ? `Aufgabe: ${task}\n\nGib mir Ideen und Ansätze, ich will sie selbst lösen.` : `Aufgabe: ${task}\n\nBitte löse die Aufgabe vollständig.`);
-        })
-    );
-  }
-  $("[data-close]", panel).onclick = () => {
+  const close = () => {
     if (ui.panel === "task") {
-      doc.mode = "notes";
+      currentDoc().mode = "notes";
       renderModeSeg();
     }
     ui.panel = null;
     persist();
     renderSidePanel();
   };
+  if (ui.panel === "design") renderDesignPanel(panel);
+  else renderTaskPanel(panel);
+  $("[data-close]", panel).onclick = close;
+}
+
+function renderTaskPanel(panel) {
+  const doc = currentDoc();
+  const draft = (doc.taskDraft ||= { topic: "", tasks: [newTask()] });
+  const formChips = (selected, auto, attr) =>
+    Object.entries(ANSWER_FORMS)
+      .map(([k, f]) => `<button class="chip ${k === selected ? "on" : ""}" ${attr}="${k}">${f.ico} ${f.label}${auto === k ? " ✓" : ""}</button>`)
+      .join("");
+  const stepper = (value, attr, min, max) =>
+    `<span class="stepper"><button ${attr}="-1" ${value <= min ? "disabled" : ""}>−</button><b>${value}</b><button ${attr}="1" ${value >= max ? "disabled" : ""}>＋</button></span>`;
+
+  panel.innerHTML = `
+    <div class="panel-head">✏️ Aufgaben-Modus <button class="icon-btn" data-close>✕</button></div>
+    <div class="panel-body">
+      <label class="field"><span>Thema / Übungsblatt (optional)</span><input class="input" id="tkTopic" value="${esc(draft.topic)}" placeholder="z. B. Übungsblatt 3"></label>
+      <div class="field-row"><span>Wie viele Aufgaben?</span>${stepper(draft.tasks.length, "data-count", 1, 10)}</div>
+      ${draft.tasks
+        .map((t, i) => {
+          const op = detectOperator(t.question);
+          const form = t.form === "auto" ? op?.form || "text" : t.form;
+          return `<div class="task-card" data-task="${i}">
+            <div class="task-title">Aufgabe ${i + 1}</div>
+            <textarea class="input" data-q="${i}" rows="2" placeholder="Aufgabe / Frage eintippen …">${esc(t.question)}</textarea>
+            ${op ? `<div class="op-hint">Erkannt: ${esc(op.hint)}</div>` : ""}
+            <div class="field-row"><span>Unteraufgaben</span>${stepper(t.subs.length, `data-subs="${i}" data-step`, 0, 8)}</div>
+            ${
+              t.subs.length
+                ? t.subs
+                    .map((s, j) => {
+                      const sop = detectOperator(s.question);
+                      const sform = s.form === "auto" ? sop?.form || form : s.form;
+                      return `<div class="sub-row">
+                        <b>${String.fromCharCode(97 + j)})</b>
+                        <input class="input" data-sq="${i}:${j}" value="${esc(s.question)}" placeholder="Teilaufgabe (optional)">
+                        <select class="input" data-sf="${i}:${j}">${Object.entries(ANSWER_FORMS)
+                          .map(([k, f]) => `<option value="${k}" ${k === sform ? "selected" : ""}>${f.ico} ${f.label}</option>`)
+                          .join("")}</select></div>`;
+                    })
+                    .join("")
+                : `<div class="field-row"><span>Wie beantworten?</span></div><div class="chip-wrap">${formChips(form, op?.form, `data-form="${i}" data-k`)}</div>`
+            }
+          </div>`;
+        })
+        .join("")}
+      <button class="btn primary" id="tkInsert" style="width:100%;margin-top:6px">📄 Vorlage ins Blatt einfügen</button>
+      <button class="btn" id="tkReset" style="width:100%;margin-top:8px">Neu anfangen</button>
+      <p class="hint" style="margin-top:12px">Tipp: Der Fragetyp wird an Wörtern wie „erläutern“, „erörtern“ oder „vergleichen“ erkannt (✓). Du kannst ihn jederzeit ändern.</p>
+    </div>`;
+
+  const save = () => persist();
+  const rerender = () => {
+    const scroll = $(".panel-body", panel).scrollTop;
+    renderTaskPanel(panel);
+    $("[data-close]", panel).onclick = () => {
+      doc.mode = "notes";
+      renderModeSeg();
+      ui.panel = null;
+      persist();
+      renderSidePanel();
+    };
+    $(".panel-body", panel).scrollTop = scroll;
+  };
+  $("#tkTopic", panel).oninput = (e) => ((draft.topic = e.target.value), save());
+  $$("[data-count]", panel).forEach(
+    (b) =>
+      (b.onclick = () => {
+        const n = draft.tasks.length + Number(b.dataset.count);
+        while (draft.tasks.length < n) draft.tasks.push(newTask());
+        draft.tasks.length = n;
+        save();
+        rerender();
+      })
+  );
+  $$("[data-subs]", panel).forEach(
+    (b) =>
+      (b.onclick = () => {
+        const t = draft.tasks[Number(b.dataset.subs)];
+        if (Number(b.dataset.step) > 0) t.subs.push({ question: "", form: "auto" });
+        else t.subs.pop();
+        save();
+        rerender();
+      })
+  );
+  $$("[data-q]", panel).forEach((ta) => {
+    ta.oninput = () => {
+      draft.tasks[Number(ta.dataset.q)].question = ta.value;
+      save();
+    };
+    ta.onchange = rerender; // Operator neu erkennen, wenn das Feld verlassen wird
+  });
+  $$("[data-form]", panel).forEach(
+    (b) =>
+      (b.onclick = () => {
+        draft.tasks[Number(b.dataset.form)].form = b.dataset.k;
+        save();
+        rerender();
+      })
+  );
+  $$("[data-sq]", panel).forEach((inp) => {
+    const [i, j] = inp.dataset.sq.split(":").map(Number);
+    inp.oninput = () => ((draft.tasks[i].subs[j].question = inp.value), save());
+    inp.onchange = rerender;
+  });
+  $$("[data-sf]", panel).forEach((sel) => {
+    const [i, j] = sel.dataset.sf.split(":").map(Number);
+    sel.onchange = () => ((draft.tasks[i].subs[j].form = sel.value), save());
+  });
+  $("#tkInsert", panel).onclick = () => insertTaskTemplate(draft);
+  $("#tkReset", panel).onclick = () => {
+    doc.taskDraft = { topic: "", tasks: [newTask()] };
+    save();
+    rerender();
+  };
+}
+
+function insertTaskTemplate(draft) {
+  setTool("text");
+  const parts = [];
+  if (draft.topic.trim()) parts.push(`<h1>${esc(draft.topic.trim())}</h1>`);
+  draft.tasks.forEach((t, i) => {
+    const op = detectOperator(t.question);
+    const form = t.form === "auto" ? op?.form || "text" : t.form;
+    parts.push(`<h2>Aufgabe ${i + 1}</h2>`);
+    if (t.question.trim()) parts.push(`<p><i>${esc(t.question.trim()).replace(/\n/g, "<br>")}</i></p>`);
+    if (!t.subs.length) parts.push(ANSWER_FORMS[form].html);
+    t.subs.forEach((s, j) => {
+      const sform = s.form === "auto" ? detectOperator(s.question)?.form || form : s.form;
+      parts.push(`<h3>${String.fromCharCode(97 + j)}) ${esc(s.question.trim())}</h3>`);
+      parts.push(ANSWER_FORMS[sform].html);
+    });
+  });
+  const firstNew = editorEl.children.length;
+  const lastEmpty = editorEl.lastElementChild && !editorEl.lastElementChild.textContent.trim() && editorEl.lastElementChild.tagName === "P";
+  if (lastEmpty) editorEl.lastElementChild.remove();
+  editorEl.insertAdjacentHTML("beforeend", parts.join(""));
+  onEditorInput();
+  normalizeBlocks();
+  // Cursor in das erste Feld zum Ausfüllen setzen
+  const inserted = [...editorEl.children].slice(lastEmpty ? firstNew - 1 : firstNew);
+  const target = inserted
+    .flatMap((el) => (/^(UL|OL)$/.test(el.tagName) ? [...el.children] : [el]))
+    .find((el) => !/^H[1-3]$/.test(el.tagName) && !el.querySelector("i") && el.textContent.replace(/[^:]*:/, "").trim() === "");
+  if (target) {
+    editorEl.focus();
+    const r = document.createRange();
+    r.selectNodeContents(target);
+    r.collapse(false);
+    getSelection().removeAllRanges();
+    getSelection().addRange(r);
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  toast("Vorlage eingefügt – einfach ausfüllen ✍️");
+}
+
+// Fertige Designs zum Antippen
+const THEMES = {
+  classic: { label: "Klassisch", pageColor: "#ffffff", accentColor: "", headingColor: "#1c1c1e" },
+  blue: { label: "Blau", pageColor: "#f6f9ff", accentColor: "#0a5bd3", headingColor: "#0a3d7a" },
+  green: { label: "Grün", pageColor: "#f5faf5", accentColor: "#1f8a3b", headingColor: "#145c28" },
+  warm: { label: "Warm", pageColor: "#fbf7ee", accentColor: "#c25e00", headingColor: "#6b3a10" },
+  rose: { label: "Rosé", pageColor: "#fdf6f8", accentColor: "#c2185b", headingColor: "#7a1240" },
+  lila: { label: "Lila", pageColor: "#f9f6fe", accentColor: "#7d3cc8", headingColor: "#4a1f80" },
+  minimal: { label: "Minimal", pageColor: "#ffffff", accentColor: "#8e8e93", headingColor: "#3a3a3c" },
+  paper: { label: "Papier", pageColor: "#f7f3e8", accentColor: "#5c4a32", headingColor: "#3d2f1c" },
+};
+
+function renderDesignPanel(panel) {
+  const doc = currentDoc();
+  const d = doc.design || {};
+  const accent = d.accentColor || moduleColor(doc.moduleId);
+  panel.innerHTML = `
+    <div class="panel-head">🎨 Design <button class="icon-btn" data-close>✕</button></div>
+    <div class="panel-body">
+      <div class="theme-grid">${Object.entries(THEMES)
+        .map(([k, t]) => {
+          const on = (d.theme || "classic") === k;
+          return `<button class="theme-card ${on ? "on" : ""}" data-theme="${k}">
+            <span class="theme-prev" style="background:${t.pageColor}"><i style="background:${t.accentColor || moduleColor(doc.moduleId)}"></i><em style="background:${t.headingColor}"></em><u></u><u></u></span>
+            ${t.label}</button>`;
+        })
+        .join("")}</div>
+      <div class="field"><span>Blatt</span><div class="seg" id="dsPaper">${Object.entries(PAPERS)
+        .map(([k, v]) => `<button data-paper="${k}" class="${k === doc.paper ? "on" : ""}">${v}</button>`)
+        .join("")}</div></div>
+      <div class="field"><span>Eigene Farben</span>
+        <div class="color-row">
+          <label><input type="color" data-c="pageColor" value="${esc(d.pageColor || "#ffffff")}"> Blatt</label>
+          <label><input type="color" data-c="accentColor" value="${esc(accent)}"> Akzent</label>
+          <label><input type="color" data-c="headingColor" value="${esc(d.headingColor || "#1c1c1e")}"> Überschriften</label>
+        </div></div>
+      <button class="btn" id="dsAll" style="width:100%">Für alle Blätter in „${esc(moduleName(doc.moduleId))}“ übernehmen</button>
+    </div>`;
+  const apply = () => {
+    applyDocLook();
+    touchDoc();
+  };
+  $$("[data-theme]", panel).forEach(
+    (b) =>
+      (b.onclick = () => {
+        const { label, ...colors } = THEMES[b.dataset.theme];
+        doc.design = { ...colors, theme: b.dataset.theme };
+        apply();
+        renderDesignPanel(panel);
+        $("[data-close]", panel).onclick = () => ((ui.panel = null), renderSidePanel());
+      })
+  );
+  $$("#dsPaper button", panel).forEach(
+    (b) =>
+      (b.onclick = () => {
+        doc.paper = b.dataset.paper;
+        $$("#dsPaper button", panel).forEach((x) => x.classList.toggle("on", x === b));
+        apply();
+      })
+  );
+  $$("[data-c]", panel).forEach(
+    (inp) =>
+      (inp.oninput = () => {
+        doc.design = { ...doc.design, [inp.dataset.c]: inp.value, theme: "custom" };
+        $$(".theme-card", panel).forEach((c) => c.classList.remove("on"));
+        apply();
+      })
+  );
+  $("#dsAll", panel).onclick = () => {
+    const same = semDocs().filter((x) => x.moduleId === doc.moduleId && x.id !== doc.id);
+    same.forEach((x) => Object.assign(x, { design: { ...doc.design }, paper: doc.paper }));
+    persist();
+    toast(`Design für ${same.length + 1} Blätter übernommen`);
+  };
 }
 
 const stripBids = (html) => html.replace(/\sdata-bid="[^"]*"/g, "");
-
-function documentChatResult(res, msgEl) {
-  const doc = currentDoc();
-  const actions = [];
-  if (res.documentHtml) {
-    const html = sanitizeHtml(res.documentHtml.replace(/^\s*<h1>[\s\S]*?<\/h1>/, (m) => (m.includes(doc.title) ? "" : m)));
-    actions.push([
-      "✓ Übernehmen",
-      () => {
-        const before = doc.html;
-        replaceDocHtml(html);
-        const t = toast("Übernommen – „Rückgängig“ im Chat möglich");
-        return ["↶ Rückgängig", () => (replaceDocHtml(before), t.remove())];
-      },
-    ]);
-  }
-  if (res.design) {
-    const prev = { ...doc.design, paper: doc.paper };
-    const { paper, ...colors } = res.design;
-    for (const [k, v] of Object.entries(colors)) if (v) doc.design[k] = v;
-    if (paper) doc.paper = paper;
-    applyDocLook();
-    persist();
-    actions.push([
-      "↶ Design zurücksetzen",
-      () => {
-        const { paper: oldPaper, ...oldColors } = prev;
-        doc.design = oldColors;
-        doc.paper = oldPaper;
-        applyDocLook();
-        persist();
-      },
-    ]);
-  }
-  addMsgActions(msgEl, actions);
-}
-
-function taskChatResult(res, msgEl) {
-  const actions = [];
-  if (res.taskIdeas?.length) {
-    const ul = document.createElement("ul");
-    ul.className = "idea-list";
-    for (const idea of res.taskIdeas) {
-      const li = document.createElement("li");
-      li.innerHTML = `<span>${esc(idea)}</span><button class="btn" title="Ins Blatt">＋</button>`;
-      li.querySelector("button").onclick = (e) => {
-        appendHtml(`<ul><li>${esc(idea)}</li></ul>`);
-        e.target.disabled = true;
-      };
-      ul.appendChild(li);
-    }
-    msgEl.appendChild(ul);
-    actions.push(["Alle als Stichpunkte einfügen", () => appendHtml(`<ul>${res.taskIdeas.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>`)]);
-  }
-  if (res.documentHtml) {
-    const html = sanitizeHtml(res.documentHtml);
-    const prev = document.createElement("div");
-    prev.className = "solution-preview";
-    prev.innerHTML = html;
-    msgEl.appendChild(prev);
-    actions.push(["In Datei einfügen", () => appendHtml(html)]);
-  }
-  addMsgActions(msgEl, actions);
-}
-
-function addMsgActions(msgEl, actions) {
-  if (!actions.length) return;
-  const bar = document.createElement("div");
-  bar.className = "msg-actions";
-  for (const [label, fn] of actions) {
-    const b = document.createElement("button");
-    b.className = "btn";
-    b.textContent = label;
-    b.onclick = () => {
-      const follow = fn();
-      if (Array.isArray(follow)) {
-        b.textContent = follow[0];
-        b.onclick = () => (follow[1](), b.remove());
-      } else b.disabled = true;
-    };
-    bar.appendChild(b);
-  }
-  msgEl.appendChild(bar);
-}
-
-function replaceDocHtml(html) {
-  const doc = currentDoc();
-  editorEl.innerHTML = html;
-  normalizeBlocks();
-  // Vom Chatbot erstellte Fassung gilt als verbessert – es wird nicht nochmal gefragt
-  doc.improved = {};
-  for (const el of editorEl.children) doc.improved[el.dataset.bid] = blockHash(el);
-  doc.html = editorEl.innerHTML;
-  touchDoc();
-  renderGlossary();
-}
-
-function appendHtml(html) {
-  editorEl.insertAdjacentHTML("beforeend", html);
-  onEditorInput();
-  normalizeBlocks();
-  editorEl.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "center" });
-}
-
-// "Selbst machen": Aufgabe ins Blatt schreiben und direkt in Stichpunkte springen
-function startSelfMode(task) {
-  setTool("text");
-  editorEl.insertAdjacentHTML(
-    "beforeend",
-    `<h2>Aufgabe</h2><p>${esc(task).replace(/\n/g, "<br>")}</p><h3>Meine Lösung</h3><ul><li><br></li></ul>`
-  );
-  const li = editorEl.querySelector("ul:last-child li:last-child");
-  editorEl.focus();
-  const r = document.createRange();
-  r.setStart(li, 0);
-  r.collapse(true);
-  getSelection().removeAllRanges();
-  getSelection().addRange(r);
-  li.scrollIntoView({ behavior: "smooth", block: "center" });
-  onEditorInput();
-}
-
-// ---------- Wiederverwendbarer Chat ----------
-
-function mountChat(container, { mode, history, hints = [], placeholder = "", payload = () => ({}), onResult = () => {} }) {
-  container.innerHTML = `
-    <div class="panel-body"><div class="chat-hints">${hints.map((h) => `<button class="chip">${esc(h)}</button>`).join("")}</div><div class="chat-log"></div></div>
-    <div class="chat-input"><textarea class="input" rows="1" placeholder="${esc(placeholder)}"></textarea><button class="btn primary">↑</button></div>`;
-  const log = $(".chat-log", container);
-  const scroller = $(".panel-body", container);
-  const input = $("textarea", container);
-  const bubble = (role, text) => {
-    const el = document.createElement("div");
-    el.className = `msg ${role === "user" ? "user" : "bot"}`;
-    el.textContent = text;
-    log.appendChild(el);
-    scroller.scrollTop = scroller.scrollHeight;
-    return el;
-  };
-  for (const m of history) bubble(m.role, m.text);
-  if (!history.length) {
-    bubble("bot", {
-      document: "Hi! Sag mir, was dir an der Datei nicht gefällt oder welches Design du möchtest – ich passe sie an.",
-      task: "Gib oben die Aufgabe ein und wähl, ob du Ideen, eine Lösung oder selbst loslegen möchtest.",
-      timetable: "Lade Screenshots deines Stundenplans hoch, dann lese ich die Module aus. Sag mir auch, wo du eine Klausur schreibst, eine Hausarbeit oder nur eine Präsentation hältst.",
-    }[mode]);
-  }
-
-  let busy = false;
-  async function send(text, extra = {}) {
-    if (busy || !text.trim()) return;
-    busy = true;
-    const prior = history.slice(-12);
-    history.push({ role: "user", text });
-    bubble("user", text);
-    const thinking = bubble("bot", "Denke nach …");
-    thinking.classList.add("thinking");
-    try {
-      const res = await api("/api/chat", { mode, history: prior, message: text, ...payload(), ...extra });
-      thinking.remove();
-      history.push({ role: "bot", text: res.reply });
-      if (history.length > 40) history.splice(0, history.length - 40);
-      const el = bubble("bot", res.reply);
-      onResult(res, el);
-      scroller.scrollTop = scroller.scrollHeight;
-    } catch (err) {
-      thinking.textContent = "⚠️ " + err.message;
-      thinking.classList.remove("thinking");
-      history.pop();
-    } finally {
-      busy = false;
-      persist();
-    }
-  }
-  const submit = () => {
-    const t = input.value;
-    input.value = "";
-    send(t);
-  };
-  $(".chat-input button", container).onclick = submit;
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submit();
-    }
-  });
-  input.addEventListener("input", () => {
-    input.style.height = "auto";
-    input.style.height = Math.min(140, input.scrollHeight) + "px";
-  });
-  $$(".chip", container).forEach((c) => (c.onclick = () => send(c.textContent)));
-  return { send };
-}
 
 // ============================================================
 // Stundenplan & Module
@@ -1983,25 +2262,26 @@ function mountChat(container, { mode, history, hints = [], placeholder = "", pay
 
 function renderTimetable(main) {
   const sem = currentSemester();
-  sem.timetable ||= { images: [], chat: [] };
+  sem.timetable ||= { images: [] };
   const tt = sem.timetable;
   main.innerHTML = `
     <div class="files-head"><div class="crumbs"><button>Stundenplan &amp; Module</button></div><span class="kind-pill">${esc(sem.name)}</span></div>
     <div class="tt-wrap"><div class="tt-grid">
       <div class="card">
         <h2>📅 Stundenplan scannen</h2>
-        <p class="hint">Screenshots hier ablegen, einfügen (${MOD}+V) oder auswählen. Danach erkennt der Chatbot automatisch deine Module.</p>
+        <p class="hint">Screenshots hier ablegen, einfügen (${MOD}+V) oder auswählen. Die Texterkennung läuft direkt auf deinem Gerät – kostenlos.</p>
         <div class="dropzone" id="dropzone">Bilder hierher ziehen oder <button class="btn" id="pickImg">Auswählen</button>
           <input type="file" id="imgInput" accept="image/*" multiple hidden></div>
         <div class="thumbs" id="thumbs"></div>
-        <div style="margin:12px 0 16px;display:flex;gap:8px;flex-wrap:wrap">
+        <div style="margin:12px 0 4px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
           <button class="btn primary" id="scanBtn">🔍 Module erkennen</button>
+          <span class="hint" id="scanState"></span>
         </div>
-        <div class="tt-chat" id="ttChat"></div>
+        <div id="scanResult"></div>
       </div>
       <div class="card">
         <h2>🎓 Meine Module</h2>
-        <p class="hint">Alle Module dieses Semesters. Farbe antippen zum Ändern.</p>
+        <p class="hint">Alle Module dieses Semesters. Farbe antippen zum Ändern, Prüfungsform auswählen oder eintippen.</p>
         <table class="module-table"><thead><tr><th>Farbe</th><th>Modul</th><th>Prüfungsform</th><th></th></tr></thead><tbody id="modBody"></tbody></table>
         <div style="margin-top:12px;display:flex;gap:8px"><input class="input" id="newModName" placeholder="Neues Modul …"><button class="btn" id="newModBtn">＋</button></div>
         <datalist id="examTypes">${EXAM_TYPES.map((t) => `<option value="${t}">`).join("")}</datalist>
@@ -2020,7 +2300,7 @@ function renderTimetable(main) {
     );
   };
   const addImages = async (files) => {
-    for (const f of files) if (f.type.startsWith("image/")) tt.images.push(await downscaleImage(f));
+    for (const f of files) if (f.type.startsWith("image/")) tt.images.push(await downscaleImage(f, 2200));
     persist();
     renderThumbs();
   };
@@ -2045,40 +2325,32 @@ function renderTimetable(main) {
     }
   };
 
-  const chat = mountChat($("#ttChat"), {
-    mode: "timetable",
-    history: tt.chat,
-    hints: ["Welche Module hast du erkannt?", "Statistik ist eine Klausur", "In Soziologie halte ich nur eine Präsentation"],
-    placeholder: "z. B. „Methoden ist eine Hausarbeit“",
-    payload: () => ({ modules: semModules().map((m) => ({ name: m.name, examType: m.examType })) }),
-    onResult: (res, el) => {
-      const added = [];
-      for (const m of res.addModules || []) {
-        if (!m.name?.trim() || findModule(m.name)) continue;
-        added.push(addModule(m.name, { examType: m.examType || "", color: m.color || undefined }).name);
-      }
-      let updated = 0;
-      for (const m of res.updateModules || []) {
-        const mod = findModule(m.name);
-        if (!mod) continue;
-        if (m.examType) mod.examType = m.examType;
-        if (m.color && /^#[0-9a-f]{6}$/i.test(m.color)) mod.color = m.color;
-        updated++;
-      }
-      persist();
-      renderSidebar();
-      renderModuleTable();
-      if (added.length || updated) {
-        const note = document.createElement("div");
-        note.className = "msg-actions";
-        note.textContent = [added.length ? `＋ ${added.length} Modul(e) hinzugefügt` : "", updated ? `✓ ${updated} aktualisiert` : ""].filter(Boolean).join(" · ");
-        el.appendChild(note);
-      }
-    },
-  });
-  $("#scanBtn").onclick = () => {
+  $("#scanBtn").onclick = async () => {
     if (!tt.images.length) return toast("Füge zuerst einen Screenshot deines Stundenplans hinzu.");
-    chat.send("Bitte lies alle Module aus meinem Stundenplan aus.", { images: tt.images });
+    const state = $("#scanState");
+    const btn = $("#scanBtn");
+    btn.disabled = true;
+    try {
+      state.textContent = "Lade Texterkennung …";
+      const Tesseract = await loadTesseract();
+      let text = "";
+      for (let i = 0; i < tt.images.length; i++) {
+        const { data } = await Tesseract.recognize(tt.images[i], "deu", {
+          logger: (m) => {
+            if (m.status === "recognizing text") state.textContent = `Bild ${i + 1}/${tt.images.length}: ${Math.round(m.progress * 100)} %`;
+          },
+        });
+        text += "\n" + data.text;
+      }
+      state.textContent = "";
+      showCandidates(moduleCandidates(text));
+    } catch (err) {
+      console.error(err);
+      state.textContent = "";
+      toast("Texterkennung fehlgeschlagen (Internet für den ersten Start nötig).", "error", 5000);
+    } finally {
+      btn.disabled = false;
+    }
   };
   const addFromInput = () => {
     const name = $("#newModName").value.trim();
@@ -2090,6 +2362,76 @@ function renderTimetable(main) {
   };
   $("#newModBtn").onclick = addFromInput;
   $("#newModName").onkeydown = (e) => e.key === "Enter" && addFromInput();
+}
+
+let tesseractPromise = null;
+function loadTesseract() {
+  tesseractPromise ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js";
+    s.onload = () => resolve(window.Tesseract);
+    s.onerror = () => {
+      tesseractPromise = null;
+      reject(new Error("Texterkennung konnte nicht geladen werden"));
+    };
+    document.head.appendChild(s);
+  });
+  return tesseractPromise;
+}
+
+// Aus erkanntem Text die Zeilen herausfiltern, die nach Modulnamen aussehen
+function moduleCandidates(text) {
+  const out = new Map();
+  for (const raw of text.split(/\n/)) {
+    const line = raw
+      .replace(/\b\d{1,2}[:.]\d{2}\s*(?:[-–]\s*\d{1,2}[:.]\d{2})?\s*(?:uhr)?/gi, " ")
+      .replace(/\b(Montag|Dienstag|Mittwoch|Donnerstag|Freitag|Samstag|Sonntag|Mo|Di|Mi|Do|Fr|Sa|So)\b\.?/g, " ")
+      .replace(/\b(Raum|R\.|HS|Hörsaal|Geb\.?|Gebäude|Seminarraum)\s*[\w./-]*\d[\w./-]*/gi, " ")
+      .replace(/\b(wöchentlich|14-täglich|zweiwöchentlich|ab|bis)\b/gi, " ")
+      .replace(/[|_[\]{}<>©®@#*=~^"'`]/g, " ")
+      .replace(/\s{2,}/g, " ")
+      .replace(/^[\s,.;:–-]+|[\s,.;:–-]+$/g, "");
+    const letters = (line.match(/\p{L}/gu) || []).length;
+    if (letters < 4 || letters / line.length < 0.6) continue;
+    if (/^(uhrzeit|zeit|woche|kw|semester|stundenplan|winter|sommer|wise|sose|vorlesungsverzeichnis)/i.test(line)) continue;
+    const key = line.toLowerCase();
+    if (!out.has(key)) out.set(key, line);
+  }
+  return [...out.values()].slice(0, 40);
+}
+
+function showCandidates(lines) {
+  const box = $("#scanResult");
+  if (!box) return;
+  if (!lines.length) {
+    box.innerHTML = `<p class="hint">Keine Modulnamen erkannt. Tipp: Screenshot größer/schärfer machen oder Module rechts von Hand eintragen.</p>`;
+    return;
+  }
+  box.innerHTML = `
+    <p class="hint" style="margin-top:12px">Erkannte Zeilen – hake deine Module an und korrigiere die Namen bei Bedarf:</p>
+    <div class="cand-list">${lines
+      .map((l, i) => {
+        const exists = !!findModule(l);
+        return `<label class="check-row"><input type="checkbox" data-c="${i}" ${exists ? "disabled" : ""}>
+          <input class="input" data-n="${i}" value="${esc(l)}">${exists ? '<small style="white-space:nowrap">schon da</small>' : ""}</label>`;
+      })
+      .join("")}</div>
+    <button class="btn primary" id="addCands" style="margin-top:10px">＋ Ausgewählte hinzufügen</button>`;
+  $("#addCands").onclick = () => {
+    let n = 0;
+    for (const c of $$("[data-c]", box)) {
+      const name = $(`[data-n="${c.dataset.c}"]`, box).value.trim();
+      if (c.checked && name && !semModules().some((m) => m.name.toLowerCase() === name.toLowerCase())) {
+        addModule(name);
+        n++;
+      }
+    }
+    if (!n) return toast("Nichts ausgewählt.");
+    toast(`${n} Modul(e) hinzugefügt ✓ – Prüfungsform rechts eintragen`);
+    box.innerHTML = "";
+    renderSidebar();
+    renderModuleTable();
+  };
 }
 
 function findModule(name) {
@@ -2375,7 +2717,6 @@ async function settingsDialog() {
         <kbd>${HEAD_MOD}+1/2/3</kbd><span>Überschrift 1/2/3 · <kbd>${HEAD_MOD}+0</kbd> Text</span>
         <kbd>${MOD}+Shift+L</kbd><span>Stichpunkte</span>
         <kbd>${MOD}+Alt+P</kbd><span>Schrift ↔ Stift</span>
-        <kbd>${MOD}+K</kbd><span>Chatbot öffnen</span>
         <kbd>${MOD}+Alt+N</kbd><span>Neues Blatt</span>
         <kbd># </kbd><span>am Zeilenanfang = Überschrift, <kbd>- </kbd> = Liste, <kbd>1. </kbd> = Nummerierung</span>
         <kbd>Tab</kbd><span>in Listen einrücken</span>
@@ -2473,9 +2814,6 @@ document.addEventListener("keydown", (e) => {
   } else if (e.altKey && e.code === "KeyP") {
     e.preventDefault();
     setTool(ui.tool === "pen" ? "text" : "pen");
-  } else if (key === "k") {
-    e.preventDefault();
-    toolbarAction("chat");
   }
 });
 
