@@ -19,16 +19,18 @@ Ist `APP_PASSWORD` gesetzt, zeigt die Seite zuerst eine Passwortabfrage. Nach de
 | Bereich | Was es macht |
 |---|---|
 | **Semester** (oben rechts) | Wechsel z. B. zwischen „WiSe 2026/2027“ und „SoSe 2027“. Jedes Semester hat eigene Module, Ordner und Blätter. |
+| **Stundenplan** | Wochenkalender: auf eine freie Stelle tippen = Veranstaltung eintragen, auf ein Modul tippen = Ordner mit den Blättern öffnen (vorne immer „＋ Neues Blatt“). Screenshots können per Texterkennung ([Tesseract](https://tesseract.projectnaptha.com)) die Module vorschlagen. |
 | **Module** (links) | Alle Module mit eigener Farbe. Ein Klick auf ein Modul fragt: Schnellnotiz, Mitschrift, Aufgabe oder Collegeblock, dazu liniertes, normales oder kariertes Blatt. „Sonstiges“ ist für alles außerhalb der Uni. |
 | **Dateien** | Übersicht wie bei Apple Dateien: Ordner, Symbol- oder Listenansicht, Suche, automatische Sortierung. Mit **＋** legst du Blätter, Ordner oder Module an oder importierst Dateien. |
-| **Schreiben** | Schriftart überall gleich (Arial, Times New Roman, Calibri, Cambria, Garamond). Überschriften haben immer dieselbe Größe und Dicke. Das Datum steht oben rechts. Die Autokorrektur des iPads ist aktiv. |
+| **Blatt** | Wie ein Collegeblock: Linien über die ganze Breite, roter Rand rechts, Schrift und Überschriften stehen auf den Linien. Große Überschrift = Modulname in Modulfarbe (änderbar), Datum oben rechts. ⤢ blendet die Seitenleisten aus; das Blatt passt sich Hoch- und Querformat an. |
+| **Modi** | **Normal** (wie Word, ohne Nachfrage), **Mitschrift** (fragt nach dem Speichern, ob verbessert werden soll), **Aufgabe** (Vorlagen-Baukasten). |
+| **Schreiben** | Schriftart pro Blatt (Arial, Calibri, Cambria, Garamond, Georgia, Helvetica, Palatino, Times New Roman, Verdana). Überschriften immer gleich. Farben Schwarz/Blau/Grün + Regenbogen-Farbfeld. Die Autokorrektur des iPads ist aktiv. |
 | **Speichern → Verbessern** | Nach dem Speichern fragt die App einmal, ob verbessert werden soll: Rechtschreibung & Grammatik (über [LanguageTool](https://languagetool.org), jede Korrektur zum Abhaken) und Formatierung aufräumen. Danach fragt sie erst wieder, wenn du etwas änderst, und prüft dann nur das Geänderte. Rote Fachbegriffe werden nie „korrigiert“. **Collegeblöcke werden nie verarbeitet.** |
 | **✨ Aufräumen** | Fürs ganze Blatt: Rechtschreibung, doppelte Leerzeichen, Satzanfänge groß, „Anführungszeichen“, → Pfeile, Zeilen mit „-“ werden Listen, „Punkte:“ vor einer Liste wird Zwischenüberschrift, leere Zeilen weg, auf Wunsch Inhaltsübersicht oben. |
 | **Fachbegriffe** | Markieren und **●&nbsp;Fachbegriff** (oder ⌘/Strg+Shift+F): Das Wort wird rot und steht unten im Glossar. Die Erklärung tippst du direkt dort ein, mit Links zu Duden, DWDS, Gabler, Spektrum, bpb, Google Scholar und Wikipedia. Hast du denselben Begriff schon in einem anderen Blatt erklärt, wird die Erklärung übernommen. |
 | **Aufgaben-Modus** | Aufgaben eintippen, Anzahl der Aufgaben und Unteraufgaben (a, b, c …) wählen. Die Antwortform wird aus dem Operator erkannt („erörtern“ → Erörterung, „nennen“ → Stichpunkte, „vergleichen“ → Vergleich …) und ist änderbar. „Vorlage einfügen“ baut eine fertige Schablone ins Blatt, die du nur noch ausfüllst. |
 | **🎨 Design** | Fertige Designs (Klassisch, Blau, Grün, Warm, Rosé, Lila, Minimal, Papier), eigene Farben, Blattart, auf Wunsch für alle Blätter eines Moduls. |
 | **Schrift / Stift** | Beim Umschalten erscheinen sofort die passenden Einstellungen: Größe und Farbe für Schrift, Dicke, Farbe, Marker und Radierer für den Stift. |
-| **Stundenplan** | Screenshots ablegen, die Texterkennung ([Tesseract](https://tesseract.projectnaptha.com)) läuft auf dem Gerät. Erkannte Zeilen anhaken, Namen korrigieren, hinzufügen. Prüfungsform pro Modul auswählen. |
 | **Export** | PDF, Word (.doc), Markdown, Text oder HTML, für einzelne Blätter, ganze Ordner oder ganze Module. |
 
 Für die Rechtschreibprüfung und die Texterkennung braucht es Internet; dabei wird der Text an LanguageTool geschickt bzw. die Texterkennung einmalig geladen.

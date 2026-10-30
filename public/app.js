@@ -68,10 +68,14 @@ const safeFileName = (s) => (s || "Notiz").replace(/[\\/:*?"<>|]+/g, "-").trim()
 // Nur Schriftarten, die an der Uni üblich sind
 const FONTS = {
   Arial: 'Arial, "Liberation Sans", Helvetica, sans-serif',
-  "Times New Roman": '"Times New Roman", "Liberation Serif", Times, serif',
-  Calibri: 'Calibri, Carlito, "Segoe UI", sans-serif',
+  Calibri: 'Calibri, Carlito, "Segoe UI", Helvetica, sans-serif',
   Cambria: 'Cambria, Caladea, Georgia, serif',
   Garamond: 'Garamond, "EB Garamond", "Times New Roman", serif',
+  Georgia: "Georgia, serif",
+  Helvetica: '"Helvetica Neue", Helvetica, Arial, sans-serif',
+  Palatino: '"Palatino Linotype", Palatino, "Book Antiqua", serif',
+  "Times New Roman": '"Times New Roman", "Liberation Serif", Times, serif',
+  Verdana: "Verdana, Geneva, sans-serif",
 };
 
 const KINDS = {
@@ -88,8 +92,6 @@ const TEXT_COLORS = [
   ["#1c1c1e", "Schwarz"],
   ["#0a5bd3", "Blau"],
   ["#1f8a3b", "Grün"],
-  ["#c25e00", "Orange"],
-  ["#7d3cc8", "Lila"],
 ];
 const PEN_COLORS = ["#1c1c1e", "#0a5bd3", "#e0201b", "#1f8a3b", "#c25e00", "#7d3cc8"];
 const MARKER_COLORS = ["rgba(255,214,10,0.45)", "rgba(52,199,89,0.35)", "rgba(255,105,180,0.35)", "rgba(100,210,255,0.4)"];
@@ -236,8 +238,10 @@ function createDoc({ moduleId = null, folderId = null, kind = "notes", paper, ti
     folderId,
     kind,
     paper: paper || state.settings.paper,
-    mode: kind === "task" ? "task" : "notes",
+    mode: { quick: "normal", block: "normal", task: "task" }[kind] || "notes",
     title: title || `${KINDS[kind].label} ${fmtShort(now)}`,
+    heading: moduleId ? moduleName(moduleId) : "",
+    font: state.settings.font,
     html: "",
     strokes: [],
     glossary: {},
@@ -752,7 +756,7 @@ function renderFilesBody(recentOnly) {
 
   const recent = atRoot && !q ? [...semDocs()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6) : [];
 
-  if (!folders.length && !docs.length && !recent.length) {
+  if (!folders.length && !docs.length && !recent.length && (atRoot || recentOnly || q)) {
     body.innerHTML = `<div class="empty-state"><div class="big">${q ? "🔍" : "🗒"}</div>${
       q ? "Nichts gefunden." : `Noch keine Blätter hier.<br><br><button class="btn primary" id="emptyNew">＋ Neues Blatt</button>`
     }</div>`;
@@ -777,7 +781,13 @@ function renderFilesBody(recentOnly) {
   let html = "";
   if (recent.length) html += `<div class="files-group-title">Zuletzt bearbeitet</div>` + wrap(recent.map(docTile).join(""));
   if (folders.length) html += `<div class="files-group-title">${atRoot ? `Module · ${esc(currentSemester().name)}` : "Ordner"}</div>` + wrap(folders.map(folderTile).join(""));
-  if (docs.length) html += `<div class="files-group-title">${q ? "Suchergebnisse" : "Blätter"}</div>` + wrap(docs.map(docTile).join(""));
+  // Im Modulordner steht vorne immer „Neues Blatt“
+  const newTile = !atRoot && !recentOnly && !q
+    ? ui.layout === "grid"
+      ? `<div class="tile new-tile" data-new-sheet role="button" tabindex="0"><div class="paper-ico new">＋</div><div class="title">Neues Blatt</div><div class="sub">${esc(moduleName(moduleId))}</div></div>`
+      : `<div class="row new-row" data-new-sheet role="button" tabindex="0"><span>＋</span><span><b>Neues Blatt</b></span><span></span><span></span><span></span></div>`
+    : "";
+  if (docs.length || newTile) html += `<div class="files-group-title">${q ? "Suchergebnisse" : "Blätter"}</div>` + wrap(newTile + docs.map(docTile).join(""));
   body.innerHTML = html;
 
   const activate = (el, fn) => {
@@ -785,6 +795,7 @@ function renderFilesBody(recentOnly) {
     el.addEventListener("keydown", (e) => e.key === "Enter" && fn());
   };
   $$("[data-open-doc]", body).forEach((el) => activate(el, () => openDoc(el.dataset.openDoc)));
+  $$("[data-new-sheet]", body).forEach((el) => activate(el, () => newSheetDialog({ moduleId, folderId })));
   $$("[data-open-module]", body).forEach((el) =>
     activate(el, () => {
       ui.loc = { moduleId: el.dataset.openModule || null, folderId: null };
@@ -927,6 +938,8 @@ let resizeObs = null;
 function openDoc(id) {
   const doc = docById(id);
   if (!doc) return;
+  doc.heading ??= doc.moduleId ? moduleName(doc.moduleId) : "";
+  doc.mode ??= "notes";
   ui.view = "editor";
   ui.docId = id;
   ui.tool = "text";
@@ -940,45 +953,41 @@ const currentDoc = () => docById(ui.docId);
 
 function renderEditor(main) {
   const doc = currentDoc();
-  const mod = moduleById(doc.moduleId);
   main.innerHTML = `
     <div class="editor-wrap">
       <div class="toolbar">
         <button class="tb" data-a="back" title="Zur Dateiübersicht">‹ Dateien</button>
+        <button class="tb" data-a="focus" id="focusBtn" title="Vollbild: Seitenleisten aus-/einblenden">⤢</button>
+        <input class="doc-title-input" id="fileTitle" value="${esc(doc.title)}" title="Dateiname" placeholder="Dateiname" autocomplete="off">
         <div class="grow"></div>
         <div class="seg" id="modeSeg" title="Modus">
-          <button data-mode="notes">📝 Mitschrift</button>
-          <button data-mode="task">✏️ Aufgabe</button>
+          <button data-mode="normal">Normal</button>
+          <button data-mode="notes">Mitschrift</button>
+          <button data-mode="task">Aufgabe</button>
         </div>
         <div class="seg" id="toolSeg" title="Schrift / Stift (${MOD}+Alt+P)">
           <button data-tool="text">𝐓 Schrift</button>
           <button data-tool="pen">✎ Stift</button>
         </div>
-        <select class="input" id="paperSel" style="width:auto" title="Blatt">${Object.entries(PAPERS)
-          .map(([k, v]) => `<option value="${k}">${v}</option>`)
-          .join("")}</select>
-        <button class="tb" data-a="tidy" title="Rechtschreibung prüfen & aufräumen">✨ Aufräumen</button>
-        <button class="tb" data-a="design" title="Design">🎨 Design</button>
-        <button class="tb" data-a="export" title="Exportieren">⤓ Export</button>
+        <button class="tb" data-a="tidy" title="Rechtschreibung prüfen & aufräumen">✨<span class="lbl"> Aufräumen</span></button>
+        <button class="tb" data-a="design" title="Design & Blatt (liniert, kariert …)">🎨<span class="lbl"> Design</span></button>
+        <button class="tb" data-a="export" title="Exportieren">⤓<span class="lbl"> Export</span></button>
         <span class="saved-state" id="savedState"></span>
         <button class="btn primary" data-a="save" title="Speichern (${MOD}+S)">Speichern</button>
       </div>
       <div class="subbar" id="subbar"></div>
       <div class="editor-body">
         <div class="canvas-scroll" id="canvasScroll">
-          <div class="sheet" id="sheet">
-            <div class="sheet-head">
-              <div class="module-tag">${KINDS[doc.kind].ico} ${esc(mod ? mod.name : "Sonstiges")}${mod?.examType ? ` · ${esc(mod.examType)}` : ""}</div>
-              <div class="sheet-date">${esc(fmtLong(Date.now()))}${
-                sameDay(doc.createdAt, Date.now()) ? "" : `<small>Erstellt am ${esc(fmtShort(doc.createdAt))}</small>`
-              }</div>
-            </div>
-            <input class="doc-title" id="docTitle" value="${esc(doc.title)}" placeholder="Titel" autocomplete="off" spellcheck="true" autocapitalize="sentences">
+          <div class="sheet-zoom" id="sheetZoom"><div class="sheet" id="sheet">
+            <div class="sheet-date">${esc(fmtLong(Date.now()))}${
+              sameDay(doc.createdAt, Date.now()) ? "" : `<small>Erstellt am ${esc(fmtShort(doc.createdAt))}</small>`
+            }</div>
+            <input class="doc-title" id="docTitle" value="${esc(doc.heading)}" placeholder="Überschrift" autocomplete="off" spellcheck="true" autocapitalize="sentences">
             <div class="page-content" id="editor" contenteditable="true" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="de"
               data-placeholder="Einfach lostippen …   # Überschrift · - Liste · rot = Fachbegriff (${MOD}+Shift+F)"></div>
             <div class="glossary" id="glossary"></div>
             <canvas class="draw-layer" id="drawLayer"></canvas>
-          </div>
+          </div></div>
         </div>
         <aside class="side-panel" id="sidePanel" hidden></aside>
       </div>
@@ -999,16 +1008,15 @@ function renderEditor(main) {
   setupCanvas();
   updateSavedState();
 
-  $("#paperSel", main).value = doc.paper;
-  $("#paperSel", main).onchange = (e) => {
-    doc.paper = e.target.value;
-    applyDocLook();
-    touchDoc();
-  };
   $("#docTitle", main).addEventListener("input", (e) => {
+    doc.heading = e.target.value;
+    touchDoc();
+  });
+  $("#fileTitle", main).addEventListener("input", (e) => {
     doc.title = e.target.value;
     touchDoc();
   });
+  $("#fileTitle", main).addEventListener("keydown", (e) => e.key === "Enter" && focusEditorStart());
   $("#docTitle", main).addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === "ArrowDown") {
       e.preventDefault();
@@ -1024,7 +1032,64 @@ function renderEditor(main) {
     if (!editorEl.textContent && !editorEl.querySelector("li, h1, h2, h3")) focusEditorStart();
   });
 
-  if (!doc.html) setTimeout(() => (doc.title ? focusEditorStart() : $("#docTitle").focus()), 30);
+  document.addEventListener("selectionchange", rememberSelection);
+  setupFit();
+  $("#focusBtn").classList.toggle("on", document.body.classList.contains("focus"));
+  if (!doc.html) setTimeout(() => (doc.heading ? focusEditorStart() : $("#docTitle").focus()), 30);
+}
+
+// Vollbild: Seitenleisten weg, Blatt so groß wie möglich (Hoch- und Querformat)
+function toggleFocus(force) {
+  const on = force ?? !document.body.classList.contains("focus");
+  document.body.classList.toggle("focus", on);
+  localStorage.setItem("nh-focus", on ? "1" : "");
+  if (on && ui.panel) {
+    ui.panel = null;
+    renderSidePanel();
+  }
+  $("#focusBtn")?.classList.toggle("on", on);
+}
+
+let fitObs = null;
+let sheetScale = 1;
+
+// Blatt immer passend zur Bildschirmbreite skalieren – das Layout bleibt gleich, Zeichnungen bleiben an ihrem Platz
+function setupFit() {
+  fitObs?.disconnect();
+  const scroll = $("#canvasScroll");
+  const zoom = $("#sheetZoom");
+  const fit = () => {
+    if (!sheetEl) return;
+    const avail = scroll.clientWidth - (scroll.clientWidth < 700 ? 16 : 48);
+    sheetScale = Math.max(0.35, Math.min(1.6, avail / SHEET_BASE_WIDTH));
+    sheetEl.style.transform = `scale(${sheetScale})`;
+    zoom.style.width = SHEET_BASE_WIDTH * sheetScale + "px";
+    zoom.style.height = sheetEl.offsetHeight * sheetScale + "px";
+    resizeCanvas(true);
+  };
+  fitObs = new ResizeObserver(fit);
+  fitObs.observe(scroll);
+  fitObs.observe(sheetEl);
+  fit();
+}
+
+// Auswahl merken, damit die Farbwahl (öffnet ein eigenes Fenster) die markierte Stelle trifft
+let savedRange = null;
+function rememberSelection() {
+  const sel = getSelection();
+  if (editorEl && sel.rangeCount && editorEl.contains(sel.getRangeAt(0).commonAncestorContainer)) savedRange = sel.getRangeAt(0).cloneRange();
+}
+
+function applyTextColor(color) {
+  editorEl.focus();
+  if (savedRange) {
+    const sel = getSelection();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+  }
+  document.execCommand("styleWithCSS", false, true);
+  document.execCommand("foreColor", false, color);
+  onEditorInput();
 }
 
 function applyDocLook() {
@@ -1035,8 +1100,7 @@ function applyDocLook() {
   sheetEl.style.setProperty("--page-bg", d.pageColor || "#ffffff");
   sheetEl.style.setProperty("--heading", d.headingColor || "#1c1c1e");
   sheetEl.style.setProperty("--doc-accent", d.accentColor || moduleColor(doc.moduleId));
-  const paperSel = $("#paperSel");
-  if (paperSel) paperSel.value = doc.paper;
+  sheetEl.style.setProperty("--doc-font", FONTS[doc.font] || FONTS[state.settings.font] || FONTS.Arial);
 }
 
 function focusEditorStart() {
@@ -1085,9 +1149,14 @@ function setTool(tool) {
 function renderSubbar() {
   const bar = $("#subbar");
   if (ui.tool === "text") {
+    const doc = currentDoc();
+    const font = FONTS[doc.font] ? doc.font : state.settings.font;
     bar.innerHTML = `
       <select id="blockSel" title="Absatzstil (feste Größen)">
         <option value="p">Text</option><option value="h1">Überschrift 1</option><option value="h2">Überschrift 2</option><option value="h3">Überschrift 3</option>
+      </select>
+      <select id="fontSel" title="Schriftart für dieses Blatt">
+        ${Object.keys(FONTS).map((f) => `<option ${f === font ? "selected" : ""} style="font-family:${FONTS[f]}">${f}</option>`).join("")}
       </select>
       <select id="sizeSel" title="Schriftgröße für Markierung">
         ${[10, 11, 12, 14, 16, 18, 22].map((s) => `<option value="${s}" ${s === state.settings.fontSize ? "selected" : ""}>${s} pt</option>`).join("")}
@@ -1098,30 +1167,37 @@ function renderSubbar() {
       <button class="tb" data-cmd="underline" title="Unterstrichen (${MOD}+U)"><u>U</u></button>
       <span class="divider"></span>
       ${TEXT_COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" data-color="${c}" title="${n}"></button>`).join("")}
+      <label class="swatch rainbow" title="Alle Farben">
+        <input type="color" id="textColorPick" value="#7d3cc8"></label>
       <button class="tb term-btn" data-cmd="term" title="Fachbegriff rot markieren (${MOD}+Shift+F)">● Fachbegriff</button>
       <span class="divider"></span>
-      <button class="tb" data-cmd="insertUnorderedList" title="Stichpunkte (${MOD}+Shift+L)">• Liste</button>
-      <button class="tb" data-cmd="insertOrderedList" title="Nummerierung">1. Liste</button>
+      <button class="tb" data-cmd="insertUnorderedList" title="Stichpunkte (${MOD}+Shift+L)">• Stichpunkte</button>
+      <button class="tb" data-cmd="insertOrderedList" title="Nummerierte Liste: 1. 2. 3.">1. Nummeriert</button>
       <span class="divider"></span>
-      <button class="tb" data-cmd="undo" title="Rückgängig (${MOD}+Z)">↶</button>
-      <button class="tb" data-cmd="redo" title="Wiederholen">↷</button>
-      <span class="divider"></span>
-      <span class="saved-state">Schrift: ${esc(state.settings.font)}</span>`;
+      <button class="tb undo" data-cmd="undo" title="Rückgängig (${MOD}+Z)">↶</button>
+      <button class="tb undo" data-cmd="redo" title="Wiederholen">↷</button>`;
     $$("[data-cmd]", bar).forEach((b) => {
       b.onmousedown = (e) => e.preventDefault();
       b.onclick = () => runCommand(b.dataset.cmd);
     });
     $$("[data-color]", bar).forEach((b) => {
       b.onmousedown = (e) => e.preventDefault();
-      b.onclick = () => {
-        document.execCommand("styleWithCSS", false, true);
-        document.execCommand("foreColor", false, b.dataset.color);
-        onEditorInput();
-      };
+      b.onclick = () => applyTextColor(b.dataset.color);
+    });
+    const pick = $("#textColorPick", bar);
+    pick.addEventListener("input", () => {
+      pick.parentElement.style.setProperty("--picked", pick.value);
+      applyTextColor(pick.value);
     });
     $("#blockSel", bar).onchange = (e) => {
       editorEl.focus();
       setBlock(e.target.value);
+    };
+    $("#fontSel", bar).onchange = (e) => {
+      doc.font = e.target.value;
+      applyDocLook();
+      touchDoc();
+      resizeCanvas();
     };
     $("#sizeSel", bar).onchange = (e) => applyFontSize(Number(e.target.value));
   } else {
@@ -1351,7 +1427,7 @@ function updateSavedState(text) {
   const el = $("#savedState");
   if (!el) return;
   const doc = currentDoc();
-  el.textContent = text || (pendingBlocks(doc).length && doc.kind !== "block" ? "Gespeichert · nicht verbessert" : "Gespeichert ✓");
+  el.textContent = text || (pendingBlocks(doc).length && doc.kind !== "block" && doc.mode !== "normal" ? "Gespeichert · nicht verbessert" : "Gespeichert ✓");
 }
 
 // ---------- Blöcke & Verbesserung ----------
@@ -1432,7 +1508,7 @@ async function saveDoc({ ask = true } = {}) {
   }
   const changed = pendingBlocks(doc);
   const sig = hash(changed.map(blockHash).join("|"));
-  if (!ask || !changed.length || doc.declinedSig === sig) {
+  if (!ask || doc.mode === "normal" || !changed.length || doc.declinedSig === sig) {
     updateSavedState();
     toast("Gespeichert ✓");
     return;
@@ -1804,6 +1880,7 @@ async function toolbarAction(a) {
   }
   if (a === "save") saveDoc({ ask: true });
   if (a === "tidy") tidyDialog();
+  if (a === "focus") toggleFocus();
   if (a === "design") {
     ui.panel = ui.panel === "design" ? (currentDoc().mode === "task" ? "task" : null) : "design";
     renderSidePanel();
@@ -1818,13 +1895,15 @@ async function toolbarAction(a) {
 async function leaveEditor() {
   if (ui.view !== "editor" || !currentDoc()) return;
   const doc = currentDoc();
-  if (!doc.html.trim() && !doc.strokes.length && doc.title === `${KINDS[doc.kind].label} ${fmtShort(doc.createdAt)}`) {
+  if (!editorEl.textContent.trim() && !doc.strokes.length && doc.title === `${KINDS[doc.kind].label} ${fmtShort(doc.createdAt)}`) {
     state.docs = state.docs.filter((d) => d.id !== doc.id); // leeres Blatt nicht aufheben
     await writeState();
   } else {
     await saveDoc({ ask: true });
   }
   resizeObs?.disconnect();
+  fitObs?.disconnect();
+  document.removeEventListener("selectionchange", rememberSelection);
   editorEl = sheetEl = canvasEl = null;
   ui.view = "files";
   if (moduleById(doc.moduleId) || doc.moduleId === null) ui.loc = { moduleId: doc.moduleId, folderId: doc.folderId };
@@ -1872,14 +1951,14 @@ function setupCanvas() {
   canvasEl.addEventListener("pointercancel", end);
 }
 
-function resizeCanvas() {
+function resizeCanvas(force = false) {
   if (!canvasEl || !sheetEl) return;
-  const dpr = window.devicePixelRatio || 1;
+  const ratio = (window.devicePixelRatio || 1) * sheetScale;
   const w = sheetEl.clientWidth;
   const h = sheetEl.offsetHeight;
-  if (canvasEl.width !== Math.round(w * dpr) || canvasEl.height !== Math.round(h * dpr)) {
-    canvasEl.width = Math.round(w * dpr);
-    canvasEl.height = Math.round(h * dpr);
+  if (force || canvasEl.width !== Math.round(w * ratio) || canvasEl.height !== Math.round(h * ratio)) {
+    canvasEl.width = Math.round(w * ratio);
+    canvasEl.height = Math.round(h * ratio);
     canvasEl.style.width = w + "px";
     canvasEl.style.height = h + "px";
     redrawCanvas();
@@ -1889,8 +1968,8 @@ function resizeCanvas() {
 function redrawCanvas() {
   if (!canvasEl) return;
   const ctx = canvasEl.getContext("2d");
-  const dpr = window.devicePixelRatio || 1;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const ratio = (window.devicePixelRatio || 1) * sheetScale;
+  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
   ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   for (const s of currentDoc().strokes) drawStroke(ctx, s, sheetEl.clientWidth);
 }
@@ -2266,9 +2345,15 @@ function renderTimetable(main) {
   const tt = sem.timetable;
   main.innerHTML = `
     <div class="files-head"><div class="crumbs"><button>Stundenplan &amp; Module</button></div><span class="kind-pill">${esc(sem.name)}</span></div>
-    <div class="tt-wrap"><div class="tt-grid">
+    <div class="tt-wrap">
+      <div class="card cal-card">
+        <div class="cal-top"><div><h2>🗓 Mein Stundenplan</h2><p class="hint">Auf eine freie Stelle tippen = Veranstaltung eintragen · auf ein Modul tippen = Ordner mit deinen Blättern öffnen.</p></div>
+          <button class="btn primary" id="addEntry">＋ Eintragen</button></div>
+        <div id="calendar"></div>
+      </div>
+      <div class="tt-grid">
       <div class="card">
-        <h2>📅 Stundenplan scannen</h2>
+        <h2>📷 Stundenplan-Screenshot</h2>
         <p class="hint">Screenshots hier ablegen, einfügen (${MOD}+V) oder auswählen. Die Texterkennung läuft direkt auf deinem Gerät – kostenlos.</p>
         <div class="dropzone" id="dropzone">Bilder hierher ziehen oder <button class="btn" id="pickImg">Auswählen</button>
           <input type="file" id="imgInput" accept="image/*" multiple hidden></div>
@@ -2287,6 +2372,8 @@ function renderTimetable(main) {
         <datalist id="examTypes">${EXAM_TYPES.map((t) => `<option value="${t}">`).join("")}</datalist>
       </div>
     </div></div>`;
+  renderCalendar();
+  $("#addEntry").onclick = () => entryDialog({});
 
   const renderThumbs = () => {
     $("#thumbs").innerHTML = tt.images.map((src, i) => `<div class="thumb"><img src="${src}" alt="Screenshot ${i + 1}"><button data-del="${i}" title="Entfernen">✕</button></div>`).join("");
@@ -2427,11 +2514,141 @@ function showCandidates(lines) {
       }
     }
     if (!n) return toast("Nichts ausgewählt.");
-    toast(`${n} Modul(e) hinzugefügt ✓ – Prüfungsform rechts eintragen`);
+    toast(`${n} Modul(e) hinzugefügt ✓ – jetzt oben im Kalender eintragen`, "", 4000);
     box.innerHTML = "";
     renderSidebar();
     renderModuleTable();
   };
+}
+
+// ---------- Kalender ----------
+
+const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+const toMin = (t) => {
+  const [h, m] = (t || "0:0").split(":").map(Number);
+  return h * 60 + (m || 0);
+};
+
+function renderCalendar() {
+  const box = $("#calendar");
+  if (!box) return;
+  const tt = currentSemester().timetable;
+  const entries = (tt.entries ||= []).filter((e) => moduleById(e.moduleId));
+  const days = entries.some((e) => e.day === 5) ? 6 : 5;
+  let startH = 8;
+  let endH = 18;
+  for (const e of entries) {
+    startH = Math.min(startH, Math.floor(toMin(e.start) / 60));
+    endH = Math.max(endH, Math.ceil(toMin(e.end) / 60));
+  }
+  const PX = 0.85; // Pixel pro Minute
+  const top = (min) => (min - startH * 60) * PX;
+  const today = (new Date().getDay() + 6) % 7;
+  const hours = Array.from({ length: endH - startH + 1 }, (_, i) => startH + i);
+
+  const column = (day) => {
+    const list = entries.filter((e) => e.day === day).sort((a, b) => toMin(a.start) - toMin(b.start));
+    // Überschneidungen nebeneinander anzeigen
+    const lanes = [];
+    for (const e of list) {
+      let lane = lanes.findIndex((end) => end <= toMin(e.start));
+      if (lane < 0) lane = lanes.push(0) - 1;
+      lanes[lane] = toMin(e.end);
+      e._lane = lane;
+    }
+    const n = Math.max(1, lanes.length);
+    return list
+      .map((e) => {
+        const m = moduleById(e.moduleId);
+        return `<div class="cal-entry" data-entry="${e.id}" role="button" tabindex="0"
+          style="top:${top(toMin(e.start))}px;height:${Math.max(26, (toMin(e.end) - toMin(e.start)) * PX - 2)}px;left:calc(${(e._lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:${esc(m.color)}">
+          <b>${esc(m.name)}</b><small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
+          <button class="cal-edit" data-edit="${e.id}" title="Bearbeiten">✎</button></div>`;
+      })
+      .join("");
+  };
+
+  box.innerHTML = `
+    <div class="cal" style="--days:${days}">
+      <div class="cal-head"><span></span>${DAYS.slice(0, days)
+        .map((d, i) => `<span class="${i === today ? "today" : ""}">${d.slice(0, 2)}<em>${d}</em></span>`)
+        .join("")}</div>
+      <div class="cal-body" style="height:${(endH - startH) * 60 * PX}px;--hour:${60 * PX}px">
+        <div class="cal-times">${hours.map((h) => `<span style="top:${top(h * 60)}px">${h}:00</span>`).join("")}</div>
+        ${Array.from({ length: days }, (_, d) => `<div class="cal-day ${d === today ? "today" : ""}" data-day="${d}">${column(d)}</div>`).join("")}
+      </div>
+    </div>
+    ${entries.length ? "" : `<p class="hint" style="margin-top:10px">Noch leer. Lege zuerst deine Module an (unten), dann trage sie hier ein.</p>`}`;
+
+  $$(".cal-day", box).forEach(
+    (col) =>
+      (col.onclick = (e) => {
+        if (e.target.closest(".cal-entry")) return;
+        const y = e.clientY - col.getBoundingClientRect().top;
+        const h = Math.min(endH - 1, Math.max(startH, startH + Math.floor(y / (60 * PX))));
+        const pad = (n) => String(n).padStart(2, "0");
+        entryDialog({ day: Number(col.dataset.day), start: `${pad(h)}:00`, end: `${pad(h + 1)}:30` });
+      })
+  );
+  $$(".cal-entry", box).forEach((el) => {
+    const entry = entries.find((x) => x.id === el.dataset.entry);
+    const open = (e) => {
+      if (e.target.closest(".cal-edit")) return entryDialog(entry);
+      ui.view = "files";
+      ui.loc = { moduleId: entry.moduleId, folderId: null };
+      ui.search = "";
+      renderAll();
+    };
+    el.onclick = open;
+    el.onkeydown = (e) => e.key === "Enter" && open(e);
+  });
+}
+
+async function entryDialog(entry) {
+  const mods = semModules();
+  const isNew = !entry.id;
+  const p = openModal(`
+    <h3>${isNew ? "Veranstaltung eintragen" : "Veranstaltung bearbeiten"}</h3>
+    <label class="field"><span>Modul</span><select class="input" id="enMod">
+      ${mods.map((m) => `<option value="${m.id}" ${m.id === entry.moduleId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}
+      <option value="__new">＋ Neues Modul …</option></select></label>
+    <label class="field" id="enNewWrap" ${mods.length ? "hidden" : ""}><span>Name des neuen Moduls</span><input class="input" id="enNew"></label>
+    <label class="field"><span>Tag</span><select class="input" id="enDay">${DAYS.map((d, i) => `<option value="${i}" ${i === (entry.day ?? 0) ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+    <div style="display:flex;gap:10px">
+      <label class="field" style="flex:1"><span>Von</span><input class="input" type="time" id="enStart" value="${esc(entry.start || "10:00")}"></label>
+      <label class="field" style="flex:1"><span>Bis</span><input class="input" type="time" id="enEnd" value="${esc(entry.end || "11:30")}"></label>
+    </div>
+    <label class="field"><span>Raum (optional)</span><input class="input" id="enRoom" value="${esc(entry.room || "")}" placeholder="z. B. HS 3"></label>
+    <div class="modal-actions">${isNew ? "" : `<button class="btn danger left" data-del>Löschen</button>`}<button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button></div>`);
+  const m = openModal.lastModal;
+  const modSel = $("#enMod", m);
+  if (!mods.length) modSel.value = "__new";
+  modSel.onchange = () => ($("#enNewWrap", m).hidden = modSel.value !== "__new");
+  $("[data-x]", m).onclick = () => m.close(null);
+  $("[data-del]", m)?.addEventListener("click", () => m.close("delete"));
+  $("[data-ok]", m).onclick = () => {
+    let moduleId = modSel.value;
+    if (moduleId === "__new") {
+      const name = $("#enNew", m).value.trim();
+      if (!name) return $("#enNew", m).focus();
+      moduleId = (findModule(name) && findModule(name).name.toLowerCase() === name.toLowerCase() ? findModule(name) : addModule(name)).id;
+    }
+    const start = $("#enStart", m).value;
+    const end = $("#enEnd", m).value;
+    if (!start || !end || toMin(end) <= toMin(start)) return toast("Bitte gültige Uhrzeiten eingeben.");
+    m.close({ moduleId, day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
+  };
+  const res = await p;
+  if (!res) return;
+  const tt = currentSemester().timetable;
+  tt.entries ||= [];
+  if (res === "delete") tt.entries = tt.entries.filter((x) => x.id !== entry.id);
+  else if (isNew) tt.entries.push({ id: uid(), ...res });
+  else Object.assign(entry, res);
+  persist();
+  renderSidebar();
+  renderCalendar();
+  renderModuleTable();
 }
 
 function findModule(name) {
@@ -2509,20 +2726,20 @@ async function exportDialog(docs, name) {
 }
 
 const EXPORT_CSS = `
-  body { margin: 0; background: #f2f2f7; font-family: var(--doc-font); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sheet { width: 794px; margin: 24px auto; background: var(--page-bg, #fff); color: #1c1c1e; padding: 56px 72px 48px; position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.12); font-size: var(--doc-size); page-break-after: always; break-after: page; }
+  body { margin: 0; background: #f2f2f7; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sheet { --line: 28px; --rule: #bcd3ea; --pad-l: 64px; --pad-r: 104px; width: 794px; min-height: 1123px; box-sizing: border-box; margin: 24px auto; background: var(--page-bg, #fff); color: #1c1c1e; padding: 58px var(--pad-r) 48px var(--pad-l); position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.12); font-family: var(--doc-font); font-size: var(--doc-size); page-break-after: always; break-after: page; }
   .sheet:last-child { page-break-after: auto; break-after: auto; }
-  .sheet-head { display: flex; justify-content: space-between; margin-bottom: 18px; }
-  .module-tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--doc-accent); }
-  .sheet-date { text-align: right; font-size: 11pt; color: #3a3a3c; }
-  .doc-title, h1 { font-size: 20pt; font-weight: 700; line-height: 56px; margin: 0; color: var(--heading); }
-  h2 { font-size: 15pt; font-weight: 700; line-height: 42px; margin: 0; color: var(--heading); }
-  h3 { font-size: 12.5pt; font-weight: 700; line-height: 28px; margin: 0; color: var(--heading); }
-  .page-content { line-height: 28px; }
-  .page-content p { margin: 0; min-height: 28px; }
+  .paper-lined::after, .paper-grid::after { content: ""; position: absolute; top: 0; bottom: 0; right: calc(var(--pad-r) - 18px); width: 1.5px; background: rgba(224,32,27,.45); }
+  .sheet-date { position: absolute; top: 18px; right: 22px; text-align: right; font-size: 10.5pt; color: #3a3a3c; }
+  .doc-title { font-size: 28pt; font-weight: 800; line-height: 1.25; margin: 0 0 14px; color: var(--doc-accent); }
+  .page-content { line-height: var(--line); margin: 0 calc(var(--pad-r) * -1) 0 calc(var(--pad-l) * -1); padding: 0 var(--pad-r) 0 var(--pad-l); min-height: 760px; }
+  .page-content p { margin: 0; min-height: var(--line); }
+  .page-content h1 { font-size: 22pt; font-weight: 800; color: var(--heading); line-height: calc(var(--line) * 2); margin: 0 calc(var(--pad-r) * -1) -8px calc(var(--pad-l) * -1); padding: 8px var(--pad-r) 0 var(--pad-l); background: linear-gradient(var(--page-bg), var(--page-bg)) no-repeat 0 2px / 100% calc(var(--line) * 2 - 4px); }
+  .page-content h2 { font-size: 16pt; font-weight: 700; line-height: var(--line); margin: 0; color: var(--heading); }
+  .page-content h3 { font-size: 13pt; font-weight: 700; line-height: var(--line); margin: 0; color: var(--heading); }
   ul, ol { margin: 0; padding-left: 26px; }
-  .paper-lined .page-content { background-image: linear-gradient(to bottom, transparent 27px, #c9dcef 27px); background-size: 100% 28px; }
-  .paper-grid .page-content { background-image: linear-gradient(to bottom, transparent 19px, #dfe6ee 19px), linear-gradient(to right, transparent 19px, #dfe6ee 19px); background-size: 20px 20px; }
+  .paper-lined .page-content { background-image: linear-gradient(to bottom, transparent calc(var(--line) - 7px), var(--rule) calc(var(--line) - 7px), var(--rule) calc(var(--line) - 6px), transparent calc(var(--line) - 6px)); background-size: 100% var(--line); }
+  .paper-grid .page-content { background-image: linear-gradient(to bottom, transparent 19px, #dbe3ec 19px), linear-gradient(to right, transparent 19px, #dbe3ec 19px); background-size: 20px 20px; }
   span.term, .term-name { color: #e0201b; font-weight: 600; }
   .drawing { position: absolute; left: 0; top: 0; width: 794px; pointer-events: none; }
   .glossary { margin-top: 36px; border-top: 2px solid var(--doc-accent); padding-top: 12px; font-size: 10.5pt; line-height: 1.5; }
@@ -2543,16 +2760,18 @@ function docTerms(doc) {
   return [...map.values()].map((t) => ({ term: t, explanation: doc.glossary?.[t.toLowerCase()]?.explanation || "" }));
 }
 
+const docHeading = (doc) => doc.heading ?? (doc.moduleId ? moduleName(doc.moduleId) : doc.title);
+
 function docToSheetHtml(doc) {
   const d = doc.design || {};
   const drawing = renderStrokesToDataUrl(doc);
   const terms = docTerms(doc);
-  const style = `--page-bg:${d.pageColor || "#fff"};--heading:${d.headingColor || "#1c1c1e"};--doc-accent:${d.accentColor || moduleColor(doc.moduleId)};${
+  const style = `--page-bg:${d.pageColor || "#fff"};--heading:${d.headingColor || "#1c1c1e"};--doc-accent:${d.accentColor || moduleColor(doc.moduleId)};--doc-font:${FONTS[doc.font] || FONTS[state.settings.font]};${
     drawing ? `min-height:${Math.max(1123, drawing.height)}px` : ""
   }`;
   return `<section class="sheet paper-${doc.paper}" style="${esc(style)}">
-    <div class="sheet-head"><div class="module-tag">${esc(moduleName(doc.moduleId))}</div><div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div></div>
-    <h1 class="doc-title">${esc(doc.title)}</h1>
+    <div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div>
+    <div class="doc-title">${esc(docHeading(doc))}</div>
     <div class="page-content">${stripBids(sanitizeHtml(doc.html))}</div>
     ${
       terms.length
@@ -2634,8 +2853,8 @@ function markdownToHtml(md) {
 function docToMarkdown(doc) {
   const terms = docTerms(doc);
   return [
-    `# ${doc.title}`,
-    `_${moduleName(doc.moduleId)} · ${fmtLong(doc.createdAt)}_`,
+    `# ${docHeading(doc) || doc.title}`,
+    `_${doc.title} · ${moduleName(doc.moduleId)} · ${fmtLong(doc.createdAt)}_`,
     htmlToMarkdown(stripBids(doc.html)),
     terms.length ? `---\n\n**Fachbegriffe**\n\n${terms.map((t) => `- **${t.term}**: ${t.explanation || "–"}`).join("\n")}` : "",
   ]
@@ -2673,7 +2892,7 @@ function exportDocs(docs, fmt, name) {
           const terms = docTerms(d);
           const drawing = renderStrokesToDataUrl(d);
           return `${i ? '<br style="page-break-before:always">' : ""}<p style="text-align:right;color:#666">${esc(moduleName(d.moduleId))} · ${esc(fmtLong(d.createdAt))}</p>
-            <h1>${esc(d.title)}</h1>${stripBids(sanitizeHtml(d.html))}
+            <h1 style="color:${esc(moduleColor(d.moduleId))}">${esc(docHeading(d) || d.title)}</h1>${stripBids(sanitizeHtml(d.html))}
             ${drawing ? `<p><img src="${drawing.url}" width="600"></p>` : ""}
             ${terms.length ? `<hr><h3>Fachbegriffe</h3>${terms.map((t) => `<p><span class="term-name">${esc(t.term)}</span>: ${esc(t.explanation || "–")}</p>`).join("")}` : ""}`;
         })
@@ -2694,8 +2913,8 @@ async function settingsDialog() {
   const p = openModal(
     `
     <h3>Einstellungen</h3>
-    <p class="lead">Schriftart und Überschriften sind in allen Blättern einheitlich.</p>
-    <label class="field"><span>Schriftart (überall gleich)</span><select class="input" id="setFont">${Object.keys(FONTS)
+    <p class="lead">Überschriften sind in allen Blättern einheitlich. Die Schriftart kannst du pro Blatt in der Schriftleiste ändern.</p>
+    <label class="field"><span>Standard-Schriftart für neue Blätter</span><select class="input" id="setFont">${Object.keys(FONTS)
       .map((f) => `<option ${f === s.font ? "selected" : ""} style="font-family:${FONTS[f]}">${f}</option>`)
       .join("")}</select></label>
     <label class="field"><span>Schriftgröße</span><select class="input" id="setSize">${[11, 12]
@@ -2831,5 +3050,6 @@ $("#sidebarToggle").addEventListener("click", () => $("#sidebar").classList.togg
   if (!state.semesters?.length) state = defaultState();
   if (!state.semesters.some((s) => s.id === state.currentSemesterId)) state.currentSemesterId = state.semesters[0].id;
   applySettings();
+  document.body.classList.toggle("focus", localStorage.getItem("nh-focus") === "1");
   renderAll();
 })();
