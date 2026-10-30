@@ -93,7 +93,14 @@ const TEXT_COLORS = [
   ["#0a5bd3", "Blau"],
   ["#1f8a3b", "Grün"],
 ];
-const PEN_COLORS = ["#1c1c1e", "#0a5bd3", "#e0201b", "#1f8a3b", "#c25e00", "#7d3cc8"];
+const PEN_COLORS = ["#1c1c1e", "#0a5bd3", "#e0201b", "#1f8a3b"];
+// Stiftarten – alle mit Farben
+const PEN_TOOLS = [
+  ["ballpoint", "🖊 Kugelschreiber", 3],
+  ["fountain", "✒️ Füller", 4],
+  ["pencil", "✏️ Bleistift", 3],
+  ["crayon", "🖍 Buntstift", 5],
+];
 const MARKER_COLORS = ["rgba(255,214,10,0.45)", "rgba(52,199,89,0.35)", "rgba(255,105,180,0.35)", "rgba(100,210,255,0.4)"];
 const EXAM_TYPES = ["Klausur", "Hausarbeit", "Präsentation", "Referat", "Mündliche Prüfung", "Portfolio", "Essay", "Protokoll", "Studienleistung", "Unbenotet"];
 const SHEET_BASE_WIDTH = 794; // A4 bei 96 dpi
@@ -107,12 +114,29 @@ const STORE = "kv";
 
 function openDb() {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE);
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
+      if (!req.result.objectStoreNames.contains("blobs")) req.result.createObjectStore("blobs");
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
+
+// Originaldateien (Anhänge) liegen getrennt, damit der Zustand klein bleibt
+async function blobStore(mode, fn) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("blobs", mode);
+    const req = fn(tx.objectStore("blobs"));
+    tx.oncomplete = () => resolve(req?.result);
+    tx.onerror = () => reject(tx.error);
+  });
+}
+const putBlob = (id, blob) => blobStore("readwrite", (st) => st.put(blob, id));
+const getBlob = (id) => blobStore("readonly", (st) => st.get(id));
+const delBlob = (id) => blobStore("readwrite", (st) => st.delete(id));
 
 async function loadState() {
   try {
@@ -178,6 +202,7 @@ function defaultState() {
     modules: [],
     folders: [],
     docs: [],
+    files: [],
   };
 }
 
@@ -188,7 +213,7 @@ const ui = {
   loc: { moduleId: undefined, folderId: null }, // moduleId undefined = Wurzel, null = Sonstiges
   docId: null,
   tool: "text",
-  pen: { kind: "pen", color: PEN_COLORS[0], width: 3, eraseMode: "stroke", autoShape: localStorage.getItem("nh-autoshape") !== "0" },
+  pen: { kind: "pen", tool: "ballpoint", color: PEN_COLORS[0], width: 3, eraseMode: "stroke", autoShape: localStorage.getItem("nh-autoshape") !== "0" },
   panel: null, // task | design
   sort: localStorage.getItem("nh-sort") || "updated",
   layout: localStorage.getItem("nh-layout") || "grid",
@@ -263,7 +288,7 @@ function createDoc({ moduleId = null, folderId = null, kind = "notes", paper, ti
 
 const ALLOWED_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "UL", "OL", "LI", "B", "STRONG", "I", "EM", "U", "S", "SUP", "SUB", "BR", "SPAN", "HR", "IMG", "TABLE", "TBODY", "THEAD", "TR", "TD", "TH"]);
 const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "SVG", "VIDEO", "AUDIO", "FORM", "INPUT", "BUTTON", "TEXTAREA", "SELECT"]);
-const KEEP_CLASSES = ["term", "box", "img-box", "checklist", "page-break", "tbl"];
+const KEEP_CLASSES = ["term", "box", "img-box", "locked", "checklist", "page-break", "tbl"];
 const KEEP_DATA = ["bid", "toc", "x", "y", "w", "checked"];
 
 function cleanNode(node) {
@@ -619,7 +644,7 @@ function plusMenu() {
     <div class="menu">
       <button data-a="sheet">📝 Neues Blatt${atRoot ? "" : ` in ${esc(moduleName(moduleId))}`}</button>
       ${atRoot ? `<button data-a="module">🎓 Neues Modul</button>` : `<button data-a="folder">📁 Neuer Ordner</button>`}
-      <button data-a="import">📥 Datei importieren (.txt, .md, .html)</button>
+      <button data-a="import">📥 Datei hinzufügen (PDF, Word, Excel, Bild …)</button>
       <button data-a="timetable">📅 Stundenplan-Screenshot hinzufügen</button>
     </div>`);
   const m = openModal.lastModal;
@@ -636,28 +661,256 @@ function plusMenu() {
   });
 }
 
+// ---------- Externe Dateien importieren ----------
+
+// Kostenlose Bibliotheken, laufen komplett auf dem Gerät
+const LIBS = {
+  mammoth: "https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js",
+  xlsx: "https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js",
+  pdf: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
+  pdfWorker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js",
+};
+
+const scriptCache = {};
+function loadScript(src) {
+  scriptCache[src] ||= new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => {
+      delete scriptCache[src];
+      reject(new Error("Bibliothek konnte nicht geladen werden"));
+    };
+    document.head.appendChild(s);
+  });
+  return scriptCache[src];
+}
+
 function importFiles(moduleId, folderId) {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = ".txt,.md,.markdown,.html,.htm";
   input.multiple = true;
   input.onchange = async () => {
-    let last;
-    for (const file of input.files) {
-      const text = await file.text();
-      const title = file.name.replace(/\.[^.]+$/, "");
-      let html;
-      if (/\.html?$/i.test(file.name)) html = sanitizeHtml(new DOMParser().parseFromString(text, "text/html").body.innerHTML);
-      else if (/\.(md|markdown)$/i.test(file.name)) html = markdownToHtml(text);
-      else html = text.split(/\n/).map((l) => `<p>${esc(l) || "<br>"}</p>`).join("");
-      last = createDoc({ moduleId, folderId, kind: "notes", title });
-      last.html = html;
+    const files = [...input.files];
+    let lastDoc = null;
+    for (const file of files) {
+      const res = await importFile(file, moduleId, folderId);
+      if (res?.html !== undefined) lastDoc = res;
     }
     persist();
     renderAll();
-    if (last) toast(`${input.files.length} Datei(en) importiert`);
+    toast(`${files.length} Datei(en) hinzugefügt`);
+    if (files.length === 1 && lastDoc) openDoc(lastDoc.id);
   };
   input.click();
+}
+
+const fileExt = (name) => (name.includes(".") ? name.split(".").pop().toLowerCase() : "");
+
+// Wandelt eine Datei in ein bearbeitbares Blatt um – was nicht geht, wird als Anhang abgelegt
+async function importFile(file, moduleId, folderId) {
+  const name = file.name.replace(/\.[^.]+$/, "");
+  const ext = fileExt(file.name);
+  const busy = toast(`„${file.name}“ wird geöffnet …`, "", 120000);
+  const flowDoc = (html) => {
+    const doc = createDoc({ moduleId, folderId, kind: "quick", paper: "blank", title: name });
+    doc.heading = name;
+    doc.html = html;
+    return doc;
+  };
+  try {
+    if (["txt", "md", "markdown", "html", "htm"].includes(ext)) {
+      const text = await file.text();
+      if (ext.startsWith("htm")) return flowDoc(sanitizeHtml(new DOMParser().parseFromString(text, "text/html").body.innerHTML));
+      if (ext.startsWith("m")) return flowDoc(markdownToHtml(text));
+      return flowDoc(text.split(/\n/).map((l) => `<p>${esc(l) || "<br>"}</p>`).join(""));
+    }
+    if (ext === "docx") {
+      await loadScript(LIBS.mammoth);
+      const { value } = await window.mammoth.convertToHtml(
+        { arrayBuffer: await file.arrayBuffer() },
+        { convertImage: window.mammoth.images.imgElement((img) => img.read("base64").then((b64) => ({ src: `data:${img.contentType};base64,${b64}` }))) }
+      );
+      return flowDoc(tablesAsTbl(sanitizeHtml(value)) || "<p><br></p>");
+    }
+    if (ext === "csv") return flowDoc(rowsToTable(parseCsv(await file.text())));
+    if (["xlsx", "xls", "ods"].includes(ext)) {
+      await loadScript(LIBS.xlsx);
+      const wb = window.XLSX.read(await file.arrayBuffer());
+      const parts = wb.SheetNames.map((n) => {
+        const rows = window.XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: false, defval: "" });
+        return `${wb.SheetNames.length > 1 ? `<h2>${esc(n)}</h2>` : ""}${rowsToTable(rows)}`;
+      });
+      return flowDoc(parts.join("<p><br></p>"));
+    }
+    if (ext === "pdf") return await pdfToDoc(file, name, moduleId, folderId);
+    if (file.type.startsWith("image/")) return await imageToDoc(file, name, moduleId, folderId);
+    return await addAttachment(file, moduleId, folderId);
+  } catch (err) {
+    console.error(err);
+    toast(`„${file.name}“ konnte nicht umgewandelt werden – als Anhang gespeichert.`, "error", 5000);
+    return addAttachment(file, moduleId, folderId);
+  } finally {
+    busy.remove();
+  }
+}
+
+function tablesAsTbl(html) {
+  const box = document.createElement("div");
+  box.innerHTML = html;
+  $$("table", box).forEach((t) => (t.className = "tbl"));
+  return box.innerHTML;
+}
+
+function parseCsv(text) {
+  const firstLine = text.split(/\r?\n/)[0] || "";
+  const sep = (firstLine.match(/;/g) || []).length > (firstLine.match(/,/g) || []).length ? ";" : firstLine.includes("\t") ? "\t" : ",";
+  const rows = [];
+  let row = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') {
+        cell += '"';
+        i++;
+      } else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === sep) {
+      row.push(cell);
+      cell = "";
+    } else if (c === "\n" || c === "\r") {
+      if (c === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+    } else cell += c;
+  }
+  if (cell || row.length) rows.push([...row, cell]);
+  return rows;
+}
+
+function rowsToTable(rows) {
+  rows = rows.filter((r) => r.some((c) => String(c).trim()));
+  if (!rows.length) return "<p><br></p>";
+  const cols = Math.max(...rows.map((r) => r.length));
+  return `<table class="tbl"><tbody>${rows
+    .map((r, i) => `<tr>${Array.from({ length: cols }, (_, j) => `<td>${i === 0 ? "<b>" : ""}${esc(r[j] ?? "") || "<br>"}${i === 0 ? "</b>" : ""}</td>`).join("")}</tr>`)
+    .join("")}</tbody></table><p><br></p>`;
+}
+
+// Seitenbild als festen Hintergrund-Block (darauf kann man schreiben und malen)
+function pageImageBox(src, n, ratio) {
+  let w = SHEET_BASE_WIDTH;
+  if (w * ratio > PAGE_H) w = Math.floor(PAGE_H / ratio);
+  const x = Math.floor((SHEET_BASE_WIDTH - w) / 2);
+  return `<div class="box img-box locked" data-x="${x}" data-y="${n * STRIDE}" data-w="${w}"><img src="${src}" alt=""></div>`;
+}
+
+async function pdfToDoc(file, name, moduleId, folderId) {
+  await loadScript(LIBS.pdf);
+  const pdfjs = window.pdfjsLib;
+  pdfjs.GlobalWorkerOptions.workerSrc = LIBS.pdfWorker;
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const count = Math.min(pdf.numPages, 80);
+  const boxesHtml = [];
+  for (let i = 1; i <= count; i++) {
+    const page = await pdf.getPage(i);
+    const vp1 = page.getViewport({ scale: 1 });
+    const vp = page.getViewport({ scale: (SHEET_BASE_WIDTH * 2) / vp1.width });
+    const c = document.createElement("canvas");
+    c.width = Math.round(vp.width);
+    c.height = Math.round(vp.height);
+    const g = c.getContext("2d");
+    g.fillStyle = "#fff";
+    g.fillRect(0, 0, c.width, c.height);
+    await page.render({ canvasContext: g, viewport: vp }).promise;
+    boxesHtml.push(pageImageBox(c.toDataURL("image/jpeg", 0.85), i - 1, vp.height / vp.width));
+  }
+  const doc = createDoc({ moduleId, folderId, kind: "quick", paper: "pdf", title: name });
+  doc.heading = "";
+  doc.pages = count;
+  doc.html = boxesHtml.join("");
+  if (pdf.numPages > count) toast(`Nur die ersten ${count} Seiten wurden übernommen.`, "", 5000);
+  return doc;
+}
+
+async function imageToDoc(file, name, moduleId, folderId) {
+  const src = await downscaleImage(file, 2000);
+  const img = new Image();
+  await new Promise((r, j) => ((img.onload = r), (img.onerror = j), (img.src = src)));
+  const doc = createDoc({ moduleId, folderId, kind: "quick", paper: "pdf", title: name });
+  doc.heading = "";
+  doc.html = pageImageBox(src, 0, img.height / img.width);
+  return doc;
+}
+
+// ---------- Anhänge (Originaldateien) ----------
+
+async function addAttachment(file, moduleId, folderId) {
+  const id = uid();
+  await putBlob(id, file);
+  const now = Date.now();
+  const att = { id, semesterId: state.currentSemesterId, moduleId, folderId, name: file.name, mime: file.type, size: file.size, createdAt: now, updatedAt: now };
+  state.files.push(att);
+  return att;
+}
+
+const fileIcon = (name) =>
+  ({ pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📗", ppt: "📙", pptx: "📙", zip: "🗜", mp3: "🎵", m4a: "🎵", mp4: "🎬", mov: "🎬" })[fileExt(name)] || "📄";
+const fmtSize = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
+const CONVERTIBLE = ["pdf", "docx", "xlsx", "xls", "ods", "csv", "txt", "md", "html", "htm", "png", "jpg", "jpeg", "gif", "webp"];
+
+async function openAttachment(att, download = false) {
+  const blob = await getBlob(att.id);
+  if (!blob) return toast("Datei nicht gefunden.", "error");
+  const url = URL.createObjectURL(blob instanceof File ? blob : new File([blob], att.name, { type: att.mime }));
+  if (download) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = att.name;
+    a.click();
+  } else if (!window.open(url, "_blank")) location.href = url;
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+async function attachmentMenu(att) {
+  const canEdit = CONVERTIBLE.includes(fileExt(att.name));
+  const p = openModal(`
+    <h3>${fileIcon(att.name)} ${esc(att.name)}</h3><p class="lead">${esc(moduleName(att.moduleId))} · ${fmtSize(att.size)}</p>
+    <div class="menu">
+      <button data-a="open">📄 Öffnen</button>
+      ${canEdit ? `<button data-a="edit">✏️ Als Blatt bearbeiten</button>` : ""}
+      <button data-a="download">⤓ Herunterladen</button>
+      <button data-a="rename">✏️ Umbenennen</button>
+      <button data-a="move">📁 Verschieben</button>
+      <button data-a="delete" class="danger">🗑 Löschen</button>
+    </div>`);
+  const m = openModal.lastModal;
+  $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
+  const a = await p;
+  if (a === "open") openAttachment(att);
+  if (a === "download") openAttachment(att, true);
+  if (a === "edit") {
+    const blob = await getBlob(att.id);
+    const doc = await importFile(new File([blob], att.name, { type: att.mime || blob.type }), att.moduleId, att.folderId);
+    persist();
+    if (doc?.html !== undefined) return openDoc(doc.id);
+  }
+  if (a === "rename") {
+    const name = await promptModal("Umbenennen", "Dateiname", att.name);
+    if (name) att.name = name;
+  }
+  if (a === "move") await moveDialog(att);
+  if (a === "delete" && (await confirmModal("Datei löschen?", `„${att.name}“ wird endgültig gelöscht.`, "Löschen", { danger: true }))) {
+    state.files = state.files.filter((f) => f.id !== att.id);
+    delBlob(att.id);
+  }
+  persist();
+  renderAll();
 }
 
 // ============================================================
@@ -766,14 +1019,19 @@ function renderFilesBody(recentOnly) {
     folders = state.folders
       .filter((f) => f.semesterId === state.currentSemesterId && f.moduleId === moduleId && f.parentId === folderId)
       .sort((a, b) => a.name.localeCompare(b.name, "de"))
-      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: moduleColor(moduleId), sub: `${state.docs.filter((d) => d.folderId === f.id).length} Objekte` }));
+      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: moduleColor(moduleId), sub: `${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
     docs = semDocs().filter((d) => d.moduleId === moduleId && d.folderId === folderId);
   }
   if (!recentOnly || q) docs = sortDocs(docs);
+  const semFiles = state.files.filter((f) => f.semesterId === state.currentSemesterId);
+  let atts = [];
+  if (q) atts = semFiles.filter((f) => (atRoot || recentOnly || f.moduleId === moduleId) && f.name.toLowerCase().includes(q));
+  else if (recentOnly) atts = [...semFiles].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12);
+  else if (!atRoot) atts = semFiles.filter((f) => f.moduleId === moduleId && f.folderId === folderId).sort((a, b) => a.name.localeCompare(b.name, "de"));
 
   const recent = atRoot && !q ? [...semDocs()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6) : [];
 
-  if (!folders.length && !docs.length && !recent.length && (atRoot || recentOnly || q)) {
+  if (!folders.length && !docs.length && !atts.length && !recent.length && (atRoot || recentOnly || q)) {
     body.innerHTML = `<div class="empty-state"><div class="big">${q ? "🔍" : "🗒"}</div>${
       q ? "Nichts gefunden." : `Noch keine Blätter hier.<br><br><button class="btn primary" id="emptyNew">＋ Neues Blatt</button>`
     }</div>`;
@@ -795,24 +1053,34 @@ function renderFilesBody(recentOnly) {
         }</span><span class="muted hide-sm">${esc(KINDS[d.kind]?.label)}</span><span class="muted hide-sm">${esc(fmtRelative(d.updatedAt))}</span><button class="more" data-more-doc="${d.id}">⋯</button></div>`;
   const wrap = (items) => (ui.layout === "grid" ? `<div class="grid">${items}</div>` : `<div class="list">${items}</div>`);
 
+  const activate = (el, fn) => {
+    el.addEventListener("click", (e) => !e.target.closest(".more") && fn());
+    el.addEventListener("keydown", (e) => e.key === "Enter" && fn());
+  };
   let html = "";
   if (recent.length) html += `<div class="files-group-title">Zuletzt bearbeitet</div>` + wrap(recent.map(docTile).join(""));
   if (folders.length) html += `<div class="files-group-title">${atRoot ? `Module · ${esc(currentSemester().name)}` : "Ordner"}</div>` + wrap(folders.map(folderTile).join(""));
   // Im Modulordner steht vorne immer „Neues Blatt“
   const newTile = !atRoot && !recentOnly && !q
     ? ui.layout === "grid"
-      ? `<div class="tile new-tile" data-new-sheet role="button" tabindex="0"><div class="paper-ico new">＋</div><div class="title">Neues Blatt</div><div class="sub">${esc(moduleName(moduleId))}</div></div>`
-      : `<div class="row new-row" data-new-sheet role="button" tabindex="0"><span>＋</span><span><b>Neues Blatt</b></span><span></span><span></span><span></span></div>`
+      ? `<div class="tile new-tile" data-new-sheet role="button" tabindex="0"><div class="paper-ico new">＋</div><div class="title">Neues Blatt</div><div class="sub">${esc(moduleName(moduleId))}</div></div>
+         <div class="tile new-tile" data-add-file role="button" tabindex="0"><div class="paper-ico new">📥</div><div class="title">Datei hinzufügen</div><div class="sub">PDF, Word, Excel …</div></div>`
+      : `<div class="row new-row" data-new-sheet role="button" tabindex="0"><span>＋</span><span><b>Neues Blatt</b></span><span></span><span></span><span></span></div>
+         <div class="row new-row" data-add-file role="button" tabindex="0"><span>📥</span><span><b>Datei hinzufügen</b></span><span></span><span></span><span></span></div>`
     : "";
   if (docs.length || newTile) html += `<div class="files-group-title">${q ? "Suchergebnisse" : "Blätter"}</div>` + wrap(newTile + docs.map(docTile).join(""));
+  const fileTile = (f) =>
+    ui.layout === "grid"
+      ? `<div class="tile" data-open-file="${f.id}" role="button" tabindex="0"><div class="file-ico">${fileIcon(f.name)}<span>${esc(fileExt(f.name).toUpperCase())}</span></div><div class="title">${esc(f.name)}</div><div class="sub">${fmtSize(f.size)}</div><button class="more" data-more-file="${f.id}">⋯</button></div>`
+      : `<div class="row" data-open-file="${f.id}" role="button" tabindex="0"><span>${fileIcon(f.name)}</span><span>${esc(f.name)}</span><span class="muted hide-sm">${esc(fileExt(f.name).toUpperCase())}-Datei</span><span class="muted hide-sm">${fmtSize(f.size)}</span><button class="more" data-more-file="${f.id}">⋯</button></div>`;
+  if (atts.length) html += `<div class="files-group-title">Dateien</div>` + wrap(atts.map(fileTile).join(""));
   body.innerHTML = html;
+  $$("[data-open-file]", body).forEach((el) => activate(el, () => openAttachment(state.files.find((f) => f.id === el.dataset.openFile))));
+  $$("[data-more-file]", body).forEach((b) => (b.onclick = (e) => (e.stopPropagation(), attachmentMenu(state.files.find((f) => f.id === b.dataset.moreFile)))));
 
-  const activate = (el, fn) => {
-    el.addEventListener("click", (e) => !e.target.closest(".more") && fn());
-    el.addEventListener("keydown", (e) => e.key === "Enter" && fn());
-  };
   $$("[data-open-doc]", body).forEach((el) => activate(el, () => openDoc(el.dataset.openDoc)));
   $$("[data-new-sheet]", body).forEach((el) => activate(el, () => newSheetDialog({ moduleId, folderId })));
+  $$("[data-add-file]", body).forEach((el) => activate(el, () => importFiles(moduleId, folderId)));
   $$("[data-open-module]", body).forEach((el) =>
     activate(el, () => {
       ui.loc = { moduleId: el.dataset.openModule || null, folderId: null };
@@ -907,7 +1175,7 @@ async function folderMenu(folder) {
   }
   if (a === "export") await exportDialog(sortDocs(state.docs.filter((d) => d.folderId === folder.id)), folder.name);
   if (a === "delete" && (await confirmModal("Ordner löschen?", "Die Blätter darin bleiben erhalten und rutschen eine Ebene nach oben.", "Löschen", { danger: true }))) {
-    state.docs.forEach((d) => d.folderId === folder.id && (d.folderId = folder.parentId));
+    [...state.docs, ...state.files].forEach((d) => d.folderId === folder.id && (d.folderId = folder.parentId));
     state.folders.forEach((f) => f.parentId === folder.id && (f.parentId = folder.parentId));
     state.folders = state.folders.filter((f) => f.id !== folder.id);
   }
@@ -935,7 +1203,7 @@ async function moduleMenu(moduleId) {
   }
   if (a === "export") await exportDialog(sortDocs(semDocs().filter((d) => d.moduleId === moduleId)), moduleName(moduleId));
   if (a === "delete" && (await confirmModal("Modul löschen?", "Die Blätter des Moduls werden nach „Sonstiges“ verschoben.", "Löschen", { danger: true }))) {
-    state.docs.forEach((d) => d.moduleId === moduleId && Object.assign(d, { moduleId: null, folderId: null }));
+    [...state.docs, ...state.files].forEach((d) => d.moduleId === moduleId && Object.assign(d, { moduleId: null, folderId: null }));
     state.folders = state.folders.filter((f) => f.moduleId !== moduleId);
     state.modules = state.modules.filter((x) => x.id !== moduleId);
   }
@@ -1193,7 +1461,7 @@ function layoutPages(sheet, editor, doc, scale) {
   if (isFree(doc)) {
     let bottom = 0;
     for (const b of $$(":scope > .box", editor)) bottom = Math.max(bottom, Number(b.dataset.y) + b.offsetHeight);
-    return Math.max(doc.pages || 1, Math.ceil((bottom + PAGE_BOTTOM) / STRIDE), 1);
+    return Math.max(doc.pages || 1, Math.ceil((bottom + (doc.paper === "pdf" ? 0 : PAGE_BOTTOM)) / STRIDE), 1);
   }
   const units = flowUnits(editor);
   units.forEach((u) => (u.style.marginTop = ""));
@@ -1245,7 +1513,8 @@ function prepareBox(b) {
 
 // Zeile einrasten und nie in der Lücke zwischen zwei Seiten landen
 function snapY(y) {
-  y = CONTENT_TOP + Math.max(0, Math.round((y - CONTENT_TOP) / LINE)) * LINE;
+  const top = currentDoc()?.paper === "pdf" ? 0 : CONTENT_TOP;
+  y = top + Math.max(0, Math.round((y - top) / LINE)) * LINE;
   const n = Math.floor(y / STRIDE);
   if (y > n * STRIDE + PAGE_H - PAGE_BOTTOM) y = (n + 1) * STRIDE + PAGE_TOP;
   if (n > 0 && y < n * STRIDE + PAGE_TOP) y = n * STRIDE + PAGE_TOP;
@@ -2525,7 +2794,12 @@ function renderPenBar(bar) {
       <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">🧽 Radiergummi</button>
       <button data-pen="lasso" class="${pen.kind === "lasso" ? "on" : ""}" title="Gemaltes einkreisen und verschieben">✨ Magic Stift</button>
     </div>
-    ${pen.kind === "pen" ? `<button class="chip ${pen.autoShape ? "on" : ""}" id="autoShape" title="Gerade Striche und Pfeile automatisch sauber machen">📐 Auto-Form</button>` : ""}
+    ${
+      pen.kind === "pen"
+        ? `<span class="divider"></span>${PEN_TOOLS.map(([k, l]) => `<button class="chip ${pen.tool === k ? "on" : ""}" data-tool-type="${k}">${l}</button>`).join("")}
+      <button class="chip ${pen.autoShape ? "on" : ""}" id="autoShape" title="Gerade Striche und Pfeile automatisch sauber machen">📐 Auto-Form</button>`
+        : ""
+    }
     ${
       pen.kind === "eraser"
         ? `<span class="divider"></span><button class="chip ${pen.eraseMode === "stroke" ? "on" : ""}" data-erase="stroke">Ganze Striche</button><button class="chip ${pen.eraseMode === "pixel" ? "on" : ""}" data-erase="pixel">Genau radieren</button>`
@@ -2563,6 +2837,14 @@ function renderPenBar(bar) {
         pen.customColor = false;
         pen.width = { pen: 3, marker: 16, eraser: 20, shape: 3 }[pen.kind] || 3;
         clearLasso();
+        renderSubbar();
+      })
+  );
+  $$("[data-tool-type]", bar).forEach(
+    (b) =>
+      (b.onclick = () => {
+        pen.tool = b.dataset.toolType;
+        pen.width = PEN_TOOLS.find(([k]) => k === pen.tool)[2];
         renderSubbar();
       })
   );
@@ -2715,7 +2997,9 @@ function setupCanvas() {
       eraseAt(pt);
       return;
     }
-    current = { kind, color: kind === "eraser" ? "#000" : color, width, points: [pt] };
+    current = { kind, color: kind === "eraser" ? "#000" : color, width, points: [[...pt, e.pressure || 0.5]] };
+    if (kind === "pen") current.tool = ui.pen.tool;
+    if (kind === "pen" && e.pointerType === "pen") current.pressure = true;
     drawStroke(ctx(), current, sheetEl.clientWidth);
   });
 
@@ -2741,7 +3025,7 @@ function setupCanvas() {
       const dx = pt[0] - moving.start[0];
       const dy = pt[1] - moving.start[1];
       const strokes = currentDoc().strokes;
-      lasso.idx.forEach((i, k) => (strokes[i].points = moving.orig[k].map(([x, y]) => [x + dx, y + dy])));
+      lasso.idx.forEach((i, k) => (strokes[i].points = moving.orig[k].map(([x, y, ...rest]) => [x + dx, y + dy, ...rest])));
       lasso.bbox = [moving.bbox[0] + dx, moving.bbox[1] + dy, moving.bbox[2] + dx, moving.bbox[3] + dy];
       redrawCanvas();
       return;
@@ -2753,7 +3037,7 @@ function setupCanvas() {
       drawStroke(ctx(), current, W);
       return;
     }
-    current.points.push(pt);
+    current.points.push([...pt, e.pressure || 0.5]);
     drawSegment(ctx(), current, W, current.points.length - 2);
   });
 
@@ -2945,10 +3229,48 @@ function redrawCanvas() {
   }
 }
 
+// Körnige Struktur für Bleistift & Buntstift
+const grainCache = new Map();
+function grain(color, tool) {
+  const key = color + tool;
+  if (!grainCache.has(key)) {
+    const c = document.createElement("canvas");
+    c.width = c.height = 48;
+    const g = c.getContext("2d");
+    g.fillStyle = color;
+    // Grundfarbe + Körnung → sieht aus wie Graphit / Wachsstift auf Papier
+    g.globalAlpha = tool === "pencil" ? 0.55 : 0.7;
+    g.fillRect(0, 0, 48, 48);
+    let seed = 7;
+    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+    for (let i = 0; i < (tool === "pencil" ? 900 : 1300); i++) {
+      g.globalAlpha = 0.35 + rnd() * 0.65;
+      g.fillRect(Math.floor(rnd() * 48), Math.floor(rnd() * 48), 1, 1);
+    }
+    grainCache.set(key, c);
+  }
+  return grainCache.get(key);
+}
+
+// Füller: Strichbreite je nach Druck (Apple Pencil) oder Tempo
+function segWidth(s, i, W) {
+  const base = (s.width * W) / SHEET_BASE_WIDTH;
+  if (s.tool !== "fountain") return base;
+  const a = s.points[i - 1] || s.points[i];
+  const b = s.points[i];
+  if (s.pressure) return base * (0.3 + 1.2 * ((a[2] + b[2]) / 2));
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]) * SHEET_BASE_WIDTH;
+  return base * Math.max(0.45, Math.min(1.35, 1.35 - len / 18));
+}
+
 function strokeStyle(ctx, s, W) {
   ctx.globalCompositeOperation = s.kind === "eraser" ? "destination-out" : s.kind === "marker" ? "multiply" : "source-over";
   ctx.strokeStyle = ctx.fillStyle = s.color;
-  ctx.lineWidth = (s.width * W) / SHEET_BASE_WIDTH;
+  if (s.tool === "pencil" || s.tool === "crayon") {
+    ctx.strokeStyle = ctx.fillStyle = ctx.createPattern(grain(s.color, s.tool), "repeat");
+    ctx.globalAlpha = s.tool === "pencil" ? 0.85 : 0.95;
+  }
+  ctx.lineWidth = ((s.tool === "pencil" ? 0.8 : 1) * s.width * W) / SHEET_BASE_WIDTH;
   ctx.lineCap = s.kind === "marker" ? "butt" : "round";
   ctx.lineJoin = "round";
 }
@@ -2987,6 +3309,17 @@ function drawStroke(ctx, s, W) {
     return;
   }
   const pts = s.points.map(([x, y]) => [x * W, y * W]);
+  if (s.tool === "fountain" && pts.length > 1) {
+    for (let i = 1; i < pts.length; i++) {
+      ctx.lineWidth = segWidth(s, i, W);
+      ctx.beginPath();
+      ctx.moveTo(pts[i - 1][0], pts[i - 1][1]);
+      ctx.lineTo(pts[i][0], pts[i][1]);
+      ctx.stroke();
+    }
+    ctx.restore();
+    return;
+  }
   ctx.beginPath();
   if (pts.length === 1) {
     ctx.arc(pts[0][0], pts[0][1], ctx.lineWidth / 2, 0, Math.PI * 2);
@@ -3015,6 +3348,7 @@ function drawSegment(ctx, s, W, i) {
   ctx.save();
   strokeStyle(ctx, s, W);
   const [a, b] = [s.points[i], s.points[i + 1]];
+  if (s.tool === "fountain") ctx.lineWidth = segWidth(s, i + 1, W);
   ctx.beginPath();
   ctx.moveTo(a[0] * W, a[1] * W);
   ctx.lineTo(b[0] * W, b[1] * W);
@@ -3283,7 +3617,7 @@ function renderDesignPanel(panel) {
             ${t.label}</button>`;
         })
         .join("")}</div>
-      <div class="field"><span>Blatt</span><div class="hint">${PAPERS[doc.paper]} – beim Erstellen festgelegt${isFree(doc) ? " · Textblöcke frei verschiebbar (⠿)" : " · fließender Text wie in Word"}</div></div>
+      <div class="field"><span>Blatt</span><div class="hint">${PAPERS[doc.paper] || "Importierte Datei"} – beim Erstellen festgelegt${isFree(doc) ? " · Textblöcke frei verschiebbar (⠿)" : " · fließender Text wie in Word"}</div></div>
       ${
         isFree(doc)
           ? ""
@@ -3847,7 +4181,7 @@ function docToPagesHtml(doc) {
     const drawing = renderStrokesForPage(doc, n);
     return `<section class="ex-page sheet paper-${doc.paper} ${free ? "free" : "flow"}" style="${docVars(doc)}">
       <div class="sheet-bg"><div class="bg-page"><div class="pg-lines" style="top:${n ? 0 : CONTENT_TOP}px"></div><span class="pg-num">${n + 1}</span></div></div>
-      ${n === 0 ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div><div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px">${esc(docHeading(doc))}</div>` : ""}
+      ${n === 0 && doc.paper !== "pdf" ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div><div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px">${esc(docHeading(doc))}</div>` : ""}
       <div class="page-content" style="position:absolute;${pos}">${stripBids(html)}</div>
       ${drawing ? `<img class="drawing" src="${drawing}" alt="">` : ""}
     </section>`;
@@ -4005,6 +4339,16 @@ async function settingsDialog() {
     <label class="field"><span>Schriftgröße</span><select class="input" id="setSize">${[11, 12]
       .map((n) => `<option value="${n}" ${n === s.fontSize ? "selected" : ""}>${n} pt</option>`)
       .join("")}</select></label>
+    <div class="field"><span>Darstellung</span>
+      <div class="seg" id="setTheme">${[
+        ["auto", "Automatisch"],
+        ["light", "☀︎ Hell"],
+        ["dark", "☾ Dunkel"],
+      ]
+        .map(([k, l]) => `<button data-theme-opt="${k}" class="${(s.theme || "auto") === k ? "on" : ""}">${l}</button>`)
+        .join("")}</div>
+      <label class="check-row" style="border:0;padding:6px 0 0"><input type="checkbox" id="setDarkPaper" ${s.darkPaper !== false ? "checked" : ""}><span>Blätter im Dark Mode auch dunkel anzeigen</span></label>
+    </div>
     <label class="field"><span>Standard-Blatt</span><select class="input" id="setPaper">${Object.entries(PAPERS)
       .map(([k, v]) => `<option value="${k}" ${k === s.paper ? "selected" : ""}>${v}</option>`)
       .join("")}</select></label>
@@ -4032,6 +4376,15 @@ async function settingsDialog() {
   $("#setFont", m).onchange = (e) => ((s.font = e.target.value), applySettings());
   $("#setSize", m).onchange = (e) => ((s.fontSize = Number(e.target.value)), applySettings());
   $("#setPaper", m).onchange = (e) => ((s.paper = e.target.value), persist());
+  $$("[data-theme-opt]", m).forEach(
+    (b) =>
+      (b.onclick = () => {
+        s.theme = b.dataset.themeOpt;
+        $$("[data-theme-opt]", m).forEach((x) => x.classList.toggle("on", x === b));
+        applySettings();
+      })
+  );
+  $("#setDarkPaper", m).onchange = (e) => ((s.darkPaper = e.target.checked), applySettings());
   $("#renSem", m).onclick = async () => {
     m.close();
     const name = await promptModal("Semester umbenennen", "Name", sem.name);
@@ -4043,6 +4396,8 @@ async function settingsDialog() {
     m.close();
     if (!(await confirmModal("Semester löschen?", `„${sem.name}“ mit allen Modulen und Blättern wird endgültig gelöscht.`, "Löschen", { danger: true }))) return;
     state.docs = state.docs.filter((d) => d.semesterId !== sem.id);
+    state.files.filter((f) => f.semesterId === sem.id).forEach((f) => delBlob(f.id));
+    state.files = state.files.filter((f) => f.semesterId !== sem.id);
     state.modules = state.modules.filter((d) => d.semesterId !== sem.id);
     state.folders = state.folders.filter((d) => d.semesterId !== sem.id);
     state.semesters = state.semesters.filter((x) => x.id !== sem.id);
@@ -4076,7 +4431,19 @@ async function settingsDialog() {
   if (ui.view === "editor") renderSubbar();
 }
 
+// Dark Mode: Automatisch (wie das iPad), Hell oder Dunkel
+const darkQuery = matchMedia("(prefers-color-scheme: dark)");
+function applyTheme() {
+  const t = state.settings.theme || "auto";
+  const dark = t === "dark" || (t === "auto" && darkQuery.matches);
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+  document.documentElement.toggleAttribute("data-darkpaper", state.settings.darkPaper !== false);
+  localStorage.setItem("nh-theme", JSON.stringify({ t, p: state.settings.darkPaper !== false }));
+}
+darkQuery.addEventListener?.("change", () => state && applyTheme());
+
 function applySettings() {
+  applyTheme();
   document.documentElement.style.setProperty("--doc-font", FONTS[state.settings.font] || FONTS.Arial);
   document.documentElement.style.setProperty("--doc-size", state.settings.fontSize + "pt");
   persist();
@@ -4134,6 +4501,7 @@ $("#sidebarToggle").addEventListener("click", () => $("#sidebar").classList.togg
   state = (await loadState()) || defaultState();
   if (!state.semesters?.length) state = defaultState();
   if (!state.semesters.some((s) => s.id === state.currentSemesterId)) state.currentSemesterId = state.semesters[0].id;
+  state.files ||= [];
   applySettings();
   document.body.classList.toggle("focus", localStorage.getItem("nh-focus") === "1");
   renderAll();

@@ -5,6 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Notizheft</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <script>
+    // Dark Mode sofort setzen, damit nichts hell aufblitzt
+    try {
+      const t = JSON.parse(localStorage.getItem("nh-theme") || "{}");
+      const dark = t.t === "dark" || ((t.t || "auto") === "auto" && matchMedia("(prefers-color-scheme: dark)").matches);
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      if (t.p !== false) document.documentElement.setAttribute("data-darkpaper", "");
+    } catch {}
+  </script>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,700;1,400&display=swap">
   <link rel="stylesheet" href="styles.css">
 </head>
