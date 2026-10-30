@@ -268,6 +268,7 @@ function createDoc({ moduleId = null, folderId = null, kind = "notes", paper, ti
     heading: moduleId ? moduleName(moduleId) : "",
     font: state.settings.font,
     html: "",
+    floats: "",
     strokes: [],
     glossary: {},
     improved: {},
@@ -833,7 +834,7 @@ async function pdfToDoc(file, name, moduleId, folderId) {
   const doc = createDoc({ moduleId, folderId, kind: "quick", paper: "pdf", title: name });
   doc.heading = "";
   doc.pages = count;
-  doc.html = boxesHtml.join("");
+  doc.floats = boxesHtml.join("");
   if (pdf.numPages > count) toast(`Nur die ersten ${count} Seiten wurden übernommen.`, "", 5000);
   return doc;
 }
@@ -844,7 +845,7 @@ async function imageToDoc(file, name, moduleId, folderId) {
   await new Promise((r, j) => ((img.onload = r), (img.onerror = j), (img.src = src)));
   const doc = createDoc({ moduleId, folderId, kind: "quick", paper: "pdf", title: name });
   doc.heading = "";
-  doc.html = pageImageBox(src, 0, img.height / img.width);
+  doc.floats = pageImageBox(src, 0, img.height / img.width);
   return doc;
 }
 
@@ -917,13 +918,62 @@ async function attachmentMenu(att) {
 // Dateiübersicht (wie Apple Dateien)
 // ============================================================
 
-function folderSvg(color) {
-  return `<svg class="folder-ico" viewBox="0 0 74 58"><path d="M4 10a6 6 0 0 1 6-6h17l6 6h31a6 6 0 0 1 6 6v32a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}" opacity=".55"/><path d="M4 18a6 6 0 0 1 6-6h54a6 6 0 0 1 6 6v30a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}"/></svg>`;
+function folderSvg(color, emoji = "") {
+  return `<span class="folder-wrap"><svg class="folder-ico" viewBox="0 0 74 58"><path d="M4 10a6 6 0 0 1 6-6h17l6 6h31a6 6 0 0 1 6 6v32a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}" opacity=".55"/><path d="M4 18a6 6 0 0 1 6-6h54a6 6 0 0 1 6 6v30a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}"/></svg>${
+    emoji ? `<span class="folder-emoji">${esc(emoji)}</span>` : ""
+  }</span>`;
+}
+
+// Mini-Vorschau des Blatts (Überschrift + Textanfang) – oder ein eigenes Aussehen
+function docPreviewText(doc) {
+  const box = document.createElement("div");
+  box.innerHTML = (doc.html || "") + (doc.floats || "");
+  return box.textContent.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
 function paperIcon(doc) {
   const color = moduleColor(doc.moduleId);
-  return `<div class="paper-ico"><span class="stripe" style="background:${esc(color)}"></span><i class="h"></i><i></i><i class="t"></i><i></i><i style="width:60%"></i><span class="badge">${KINDS[doc.kind]?.ico || ""}</span></div>`;
+  const c = doc.cover || {};
+  if (c.image) return `<div class="paper-ico cover" style="background-image:url('${c.image}')"></div>`;
+  if (c.color || c.emoji)
+    return `<div class="paper-ico cover" style="background:${esc(c.color || "#fff")}"><span class="cover-emoji">${esc(c.emoji || "")}</span></div>`;
+  return `<div class="paper-ico preview paper-${esc(doc.paper)}"><span class="stripe" style="background:${esc(color)}"></span>
+    <b style="color:${esc(color)}">${esc(doc.heading ?? doc.title)}</b><span class="pv-text">${esc(docPreviewText(doc))}</span><span class="badge">${KINDS[doc.kind]?.ico || ""}</span></div>`;
+}
+
+// Aussehen für Blätter, Ordner und Module ändern: Farbe, Symbol, eigenes Bild
+const COVER_EMOJIS = ["📘", "📗", "📙", "📕", "📒", "📓", "📝", "🧪", "📐", "🧠", "💡", "⭐", "🎓", "💼", "🧾", "🗂️", "🌍", "⚖️", "🎨", "🎵"];
+async function coverDialog(target, { image = true, color = true } = {}) {
+  const cur = target.cover || {};
+  let pick = { ...cur };
+  const p = openModal(`
+    <h3>🎨 Aussehen ändern</h3>
+    ${color ? `<div class="field"><span>Farbe</span><div class="chip-wrap">${MODULE_COLORS.map((c) => `<button class="swatch big ${pick.color === c ? "on" : ""}" style="background:${c}" data-cc="${c}"></button>`).join("")}</div></div>` : ""}
+    <div class="field"><span>Symbol</span><div class="chip-wrap emoji-pick">${COVER_EMOJIS.map((e) => `<button class="chip ${pick.emoji === e ? "on" : ""}" data-ce="${e}">${e}</button>`).join("")}</div></div>
+    ${image ? `<div class="field"><span>Eigenes Bild</span><button class="btn" id="cvImg">🖼 Bild auswählen</button></div>` : ""}
+    <div class="modal-actions"><button class="btn left" data-reset>Zurücksetzen</button><button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Fertig</button></div>`);
+  const m = openModal.lastModal;
+  $$("[data-cc]", m).forEach((b) => (b.onclick = () => ((pick.color = b.dataset.cc), delete pick.image, $$("[data-cc]", m).forEach((x) => x.classList.toggle("on", x === b)))));
+  $$("[data-ce]", m).forEach((b) => (b.onclick = () => ((pick.emoji = b.dataset.ce), delete pick.image, $$("[data-ce]", m).forEach((x) => x.classList.toggle("on", x === b)))));
+  $("#cvImg", m)?.addEventListener("click", () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.onchange = async () => {
+      if (!input.files[0]) return;
+      pick = { image: await downscaleImage(input.files[0], 400) };
+      m.close(pick);
+    };
+    input.click();
+  });
+  $("[data-reset]", m).onclick = () => m.close({});
+  $("[data-x]", m).onclick = () => m.close(null);
+  $("[data-ok]", m).onclick = () => m.close(pick);
+  const res = await p;
+  if (!res) return;
+  target.cover = res;
+  persist();
+  renderAll();
 }
 
 function docSubtitle(doc) {
@@ -1011,7 +1061,7 @@ function renderFilesBody(recentOnly) {
     docs = [...semDocs()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 40);
   } else if (atRoot) {
     folders = [
-      ...semModules().map((m) => ({ type: "module", id: m.id, name: m.name, color: m.color, sub: m.examType || `${semDocs().filter((d) => d.moduleId === m.id).length} Objekte` })),
+      ...semModules().map((m) => ({ type: "module", id: m.id, name: m.name, color: m.color, emoji: m.cover?.emoji, sub: m.examType || `${semDocs().filter((d) => d.moduleId === m.id).length} Objekte` })),
       { type: "module", id: null, name: "Sonstiges", color: "#8e8e93", sub: `${semDocs().filter((d) => !d.moduleId).length} Objekte` },
     ];
     docs = [];
@@ -1019,7 +1069,7 @@ function renderFilesBody(recentOnly) {
     folders = state.folders
       .filter((f) => f.semesterId === state.currentSemesterId && f.moduleId === moduleId && f.parentId === folderId)
       .sort((a, b) => a.name.localeCompare(b.name, "de"))
-      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: moduleColor(moduleId), sub: `${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
+      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover?.emoji, sub: `${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
     docs = semDocs().filter((d) => d.moduleId === moduleId && d.folderId === folderId);
   }
   if (!recentOnly || q) docs = sortDocs(docs);
@@ -1041,7 +1091,7 @@ function renderFilesBody(recentOnly) {
 
   const folderTile = (f) =>
     ui.layout === "grid"
-      ? `<div class="tile" data-open-${f.type}="${f.id ?? ""}" role="button" tabindex="0">${folderSvg(f.color)}<div class="title">${esc(f.name)}</div><div class="sub">${esc(f.sub)}</div><button class="more" data-more-${f.type}="${f.id ?? ""}">⋯</button></div>`
+      ? `<div class="tile" data-open-${f.type}="${f.id ?? ""}" role="button" tabindex="0">${folderSvg(f.color, f.emoji)}<div class="title">${esc(f.name)}</div><div class="sub">${esc(f.sub)}</div><button class="more" data-more-${f.type}="${f.id ?? ""}">⋯</button></div>`
       : `<div class="row" data-open-${f.type}="${f.id ?? ""}" role="button" tabindex="0"><span>📁</span><span>${esc(f.name)}</span><span class="muted hide-sm">Ordner</span><span class="muted hide-sm">${esc(f.sub)}</span><button class="more" data-more-${f.type}="${f.id ?? ""}">⋯</button></div>`;
   const docTile = (d) =>
     ui.layout === "grid"
@@ -1109,6 +1159,7 @@ async function docMenu(doc) {
       <button data-a="move">📁 Verschieben</button>
       <button data-a="export">⤓ Exportieren</button>
       <button data-a="dup">⧉ Duplizieren</button>
+      <button data-a="cover">🎨 Aussehen ändern</button>
       <button data-a="delete" class="danger">🗑 Löschen</button>
     </div>`);
   const m = openModal.lastModal;
@@ -1124,6 +1175,7 @@ async function docMenu(doc) {
   }
   if (a === "move") await moveDialog(doc);
   if (a === "export") await exportDialog([doc], doc.title);
+  if (a === "cover") return coverDialog(doc);
   if (a === "dup") {
     const copy = structuredClone(doc);
     Object.assign(copy, { id: uid(), title: doc.title + " (Kopie)", createdAt: Date.now(), updatedAt: Date.now() });
@@ -1164,6 +1216,7 @@ async function folderMenu(folder) {
     <div class="menu">
       <button data-a="rename">✏️ Umbenennen</button>
       <button data-a="export">⤓ Alle Blätter exportieren</button>
+      <button data-a="cover">🎨 Aussehen ändern</button>
       <button data-a="delete" class="danger">🗑 Ordner löschen</button>
     </div>`);
   const m = openModal.lastModal;
@@ -1174,6 +1227,7 @@ async function folderMenu(folder) {
     if (name) folder.name = name;
   }
   if (a === "export") await exportDialog(sortDocs(state.docs.filter((d) => d.folderId === folder.id)), folder.name);
+  if (a === "cover") return coverDialog(folder, { image: false });
   if (a === "delete" && (await confirmModal("Ordner löschen?", "Die Blätter darin bleiben erhalten und rutschen eine Ebene nach oben.", "Löschen", { danger: true }))) {
     [...state.docs, ...state.files].forEach((d) => d.folderId === folder.id && (d.folderId = folder.parentId));
     state.folders.forEach((f) => f.parentId === folder.id && (f.parentId = folder.parentId));
@@ -1189,7 +1243,7 @@ async function moduleMenu(moduleId) {
     <h3>${esc(moduleName(moduleId))}</h3>
     <div class="menu">
       <button data-a="new">📝 Neues Blatt</button>
-      ${mod ? `<button data-a="rename">✏️ Umbenennen</button>` : ""}
+      ${mod ? `<button data-a="rename">✏️ Umbenennen</button><button data-a="cover">🎨 Symbol ändern</button>` : ""}
       <button data-a="export">⤓ Alle Blätter exportieren</button>
       ${mod ? `<button data-a="delete" class="danger">🗑 Modul löschen</button>` : ""}
     </div>`);
@@ -1197,6 +1251,7 @@ async function moduleMenu(moduleId) {
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
   const a = await p;
   if (a === "new") return newSheetDialog({ moduleId });
+  if (a === "cover") return coverDialog(mod, { image: false, color: false });
   if (a === "rename") {
     const name = await promptModal("Modul umbenennen", "Name", mod.name);
     if (name) mod.name = name;
@@ -1216,6 +1271,9 @@ async function moduleMenu(moduleId) {
 // ============================================================
 
 let editorEl = null;
+let floatEl = null;
+// Liegt ein Knoten im Blatt (Fließtext oder Textfeld)?
+const inDoc = (node) => !!node && (editorEl?.contains(node) || floatEl?.contains(node));
 let sheetEl = null;
 let canvasEl = null;
 let resizeObs = null;
@@ -1230,11 +1288,31 @@ const PAGE_TOP = 56;
 const PAGE_BOTTOM = 56;
 const CM = 37.8;
 
-// Liniert & kariert = freies Feld (Textblöcke frei verschiebbar), leeres Blatt = wie Word
-const isFree = (doc) => doc.paper !== "blank";
+// Alle Blätter schreiben sich wie Word. Liniert/kariert: Text steht auf den Linien.
+// Importierte PDFs/Bilder: aufs Blatt tippen setzt ein Textfeld. Textfelder & Bilder liegen frei verschiebbar darüber.
+const isRuled = (doc) => doc.paper === "lined" || doc.paper === "grid";
+const isPdf = (doc) => doc.paper === "pdf";
+
+// Alte Blätter (freie Blöcke direkt im Text) auf Fließtext + Textfelder umstellen
+function migrateDoc(doc) {
+  if (doc.floats !== undefined) return doc;
+  const box = document.createElement("div");
+  box.innerHTML = doc.html || "";
+  const blocks = $$(":scope > .box", box).sort((a, b) => a.dataset.y - b.dataset.y || a.dataset.x - b.dataset.x);
+  if (!blocks.length) {
+    doc.floats = "";
+    return doc;
+  }
+  const flow = [];
+  const floats = [];
+  for (const b of blocks) (isPdf(doc) || b.classList.contains("img-box") ? floats.push(b.outerHTML) : flow.push(b.innerHTML));
+  doc.html = flow.join("");
+  doc.floats = floats.join("");
+  return doc;
+}
 
 function insets(doc) {
-  if (isFree(doc)) return { l: 64, r: 104 };
+  if (doc.paper !== "blank") return { l: 64, r: 104 };
   const m = doc.margins || {};
   return { l: Math.round((m.l ?? 2.5) * CM), r: Math.round((m.r ?? 2.5) * CM) };
 }
@@ -1244,6 +1322,7 @@ function openDoc(id) {
   if (!doc) return;
   doc.heading ??= doc.moduleId ? moduleName(doc.moduleId) : "";
   doc.mode ??= "notes";
+  migrateDoc(doc);
   doc.margins ??= { l: 2.5, r: 2.5 };
   doc.spacing ??= 1.5;
   doc.pages ??= 1;
@@ -1293,7 +1372,8 @@ function renderEditor(main) {
               }</div>
               <input class="doc-title" id="docTitle" value="${esc(doc.heading)}" placeholder="Überschrift" autocomplete="off" spellcheck="true" autocapitalize="sentences">
               <div class="page-content" id="editor" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="de"
-                data-placeholder="${isFree(doc) ? "Irgendwo aufs Blatt tippen und losschreiben …" : "Einfach lostippen …   # Überschrift · - Liste · rot = Fachbegriff"}"></div>
+                data-placeholder="${isPdf(doc) ? "" : "Einfach lostippen …   # Überschrift · - Liste · rot = Fachbegriff"}"></div>
+              <div class="float-layer" id="floats"></div>
               <canvas class="draw-layer" id="drawLayer"></canvas>
               <div class="box-tools" id="boxTools" hidden>
                 <button class="bt-move" title="Verschieben">⠿</button>
@@ -1318,11 +1398,14 @@ function renderEditor(main) {
   editorEl = $("#editor", main);
   sheetEl = $("#sheet", main);
   canvasEl = $("#drawLayer", main);
+  floatEl = $("#floats", main);
   editorEl.innerHTML = sanitizeHtml(doc.html);
+  floatEl.innerHTML = sanitizeHtml(doc.floats || "");
   document.execCommand("defaultParagraphSeparator", false, "p");
 
   applyDocLook();
-  if (isFree(doc)) setupFreeMode();
+  setupFloats();
+  if (isPdf(doc)) editorEl.contentEditable = "false";
   else {
     editorEl.contentEditable = "true";
     editorEl.addEventListener("focus", () => {
@@ -1355,16 +1438,18 @@ function renderEditor(main) {
   });
   $$("[data-a]", main.querySelector(".toolbar")).forEach((b) => (b.onclick = () => toolbarAction(b.dataset.a)));
 
-  editorEl.addEventListener("input", onEditorInput);
-  editorEl.addEventListener("keydown", onEditorKeydown);
-  editorEl.addEventListener("paste", onEditorPaste);
-  editorEl.addEventListener("click", onEditorClick);
+  for (const el of [editorEl, floatEl]) {
+    el.addEventListener("input", onEditorInput);
+    el.addEventListener("keydown", onEditorKeydown);
+    el.addEventListener("paste", onEditorPaste);
+    el.addEventListener("click", onEditorClick);
+  }
 
   document.addEventListener("selectionchange", rememberSelection);
   setupFit();
   paginate();
   $("#focusBtn").classList.toggle("on", document.body.classList.contains("focus"));
-  if (!editorEl.textContent.trim() && !editorEl.querySelector("img")) setTimeout(() => (doc.heading ? focusEditorStart() : $("#docTitle").focus()), 30);
+  if (!editorEl.textContent.trim() && !floatEl.innerHTML.trim()) setTimeout(() => (doc.heading ? focusEditorStart() : $("#docTitle").focus()), 30);
 }
 
 // Vollbild: Seitenleisten weg, Blatt so groß wie möglich (Hoch- und Querformat)
@@ -1422,8 +1507,8 @@ function paginate() {
     paginateQueued = false;
     if (!editorEl) return;
     const doc = currentDoc();
-    const pages = layoutPages(sheetEl, editorEl, doc, sheetScale);
-    if (isFree(doc) && pages !== doc.pages) {
+    const pages = layoutPages(sheetEl, editorEl, doc, sheetScale, floatEl);
+    if (pages !== doc.pages) {
       doc.pages = pages;
       persist();
     }
@@ -1431,7 +1516,6 @@ function paginate() {
       lastPages = pages;
       renderPageBg(sheetEl, pages);
     }
-    if (isFree(doc)) editorEl.style.height = pages * STRIDE - PAGE_GAP - CONTENT_TOP + "px";
     updateStats(pages);
   });
 }
@@ -1455,21 +1539,31 @@ function flowUnits(editor) {
 }
 
 // Rechnet aus, wie viele Seiten gebraucht werden. Im Word-Modus rutschen Absätze, die nicht mehr passen, auf die nächste Seite.
-function layoutPages(sheet, editor, doc, scale) {
+function layoutPages(sheet, editor, doc, scale, floats) {
   // Blattoberkante jedes Mal neu messen – der Browser kann beim Verschieben mitscrollen
   const topOf = (el) => (el.getBoundingClientRect().top - sheet.getBoundingClientRect().top) / scale;
-  if (isFree(doc)) {
-    let bottom = 0;
-    for (const b of $$(":scope > .box", editor)) bottom = Math.max(bottom, Number(b.dataset.y) + b.offsetHeight);
-    return Math.max(doc.pages || 1, Math.ceil((bottom + (doc.paper === "pdf" ? 0 : PAGE_BOTTOM)) / STRIDE), 1);
-  }
+  let floatBottom = 0;
+  for (const b of floats ? $$(":scope > .box", floats) : []) floatBottom = Math.max(floatBottom, Number(b.dataset.y) + b.offsetHeight / (b.isConnected ? 1 : 1));
+  const floatPages = Math.ceil((floatBottom + (isPdf(doc) ? 0 : PAGE_BOTTOM)) / STRIDE);
+  if (isPdf(doc)) return Math.max(doc.pages || 1, floatPages, 1);
+  const ruled = isRuled(doc);
   const units = flowUnits(editor);
-  units.forEach((u) => (u.style.marginTop = ""));
+  units.forEach((u) => {
+    u.style.marginTop = "";
+    u.style.paddingBottom = "";
+    u.style.marginBottom = "";
+  });
   let breakNext = false;
   let bottom = CONTENT_TOP;
   for (const u of units) {
     const top = topOf(u);
-    const h = u.getBoundingClientRect().height / scale;
+    let h = u.getBoundingClientRect().height / scale;
+    // Liniert/kariert: jeder Block endet auf einer Linie (z. B. nach Bildern oder großer Schrift)
+    const rest = h % LINE;
+    if (ruled && rest > 0.5 && LINE - rest > 0.5) {
+      u.style[/^(TABLE|HR)$/.test(u.tagName) ? "marginBottom" : "paddingBottom"] = LINE - rest + "px";
+      h += LINE - rest;
+    }
     const n = Math.floor((top + 1) / STRIDE);
     const contentEnd = n * STRIDE + PAGE_H - PAGE_BOTTOM;
     const nextStart = (n + 1) * STRIDE + PAGE_TOP;
@@ -1480,23 +1574,23 @@ function layoutPages(sheet, editor, doc, scale) {
     if (target !== null && target > top) u.style.marginTop = target - top + "px";
     bottom = topOf(u) + h;
   }
-  return Math.max(1, Math.ceil((bottom + PAGE_BOTTOM) / STRIDE));
+  return Math.max(1, Math.ceil((bottom + PAGE_BOTTOM) / STRIDE), floatPages);
 }
 
 function updateStats(pages) {
   const el = $("#docStats");
   if (!el || !editorEl) return;
-  const words = (editorEl.innerText.match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu) || []).length;
+  const words = ((editorEl.innerText + " " + floatEl.innerText).match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu) || []).length;
   el.textContent = `${pages} ${pages === 1 ? "Seite" : "Seiten"} · ${words} ${words === 1 ? "Wort" : "Wörter"}`;
 }
 
 // ---------- Freies Feld (liniert & kariert) ----------
 
-const boxes = () => (editorEl ? $$(":scope > .box", editorEl) : []);
+const boxes = () => (floatEl ? $$(":scope > .box", floatEl) : []);
 
 function placeBox(b) {
   b.style.left = Number(b.dataset.x) + "px";
-  b.style.top = Number(b.dataset.y) - CONTENT_TOP + "px";
+  b.style.top = Number(b.dataset.y) + "px";
   b.style.width = Number(b.dataset.w) + "px";
 }
 
@@ -1530,7 +1624,7 @@ function newBox(x, y, html = "<p><br></p>", { cls = "", w } = {}) {
   b.dataset.y = snapY(y);
   b.dataset.w = Math.round(w ?? SHEET_BASE_WIDTH - ins.r - Number(b.dataset.x));
   b.innerHTML = html;
-  editorEl.appendChild(b);
+  floatEl.appendChild(b);
   prepareBox(b);
   return b;
 }
@@ -1551,33 +1645,27 @@ function nextFreeY() {
   return snapY(bottom + (boxes().length ? LINE : 0));
 }
 
-function setupFreeMode() {
+function setupFloats() {
   const doc = currentDoc();
-  editorEl.classList.add("free");
-  editorEl.contentEditable = "false";
-  // Ältere Blätter ohne Blöcke: alles in einen Block packen
-  if (!boxes().length && editorEl.textContent.trim()) {
-    const html = editorEl.innerHTML;
-    editorEl.innerHTML = "";
-    newBox(insets(doc).l, CONTENT_TOP, html);
-  }
   boxes().forEach(prepareBox);
-
-  // Auf eine freie Stelle tippen → neuer Textblock genau dort
-  editorEl.addEventListener("pointerdown", (e) => {
-    if (e.target !== editorEl || ui.tool !== "text") return;
-    e.preventDefault();
-    const p = sheetPoint(e);
-    const b = newBox(p.x, p.y - LINE / 2);
-    b.focus();
-    caretInto(b.firstChild);
-    showBoxTools(b);
-  });
-  editorEl.addEventListener("focusin", (e) => {
+  // PDF/Bild: auf eine freie Stelle tippen → neues Textfeld genau dort
+  if (isPdf(doc)) {
+    sheetEl.addEventListener("pointerdown", (e) => {
+      if (ui.tool !== "text" || e.pointerType === "pen" || e.button > 0) return;
+      if (e.target.closest(".box:not(.locked), .box-tools, .float-bar, .sel-bar")) return;
+      e.preventDefault();
+      const p = sheetPoint(e);
+      const b = newBox(p.x, p.y - LINE / 2);
+      b.focus();
+      caretInto(b.firstChild);
+      showBoxTools(b);
+    });
+  }
+  floatEl.addEventListener("focusin", (e) => {
     const b = e.target.closest?.(".box");
     if (b) showBoxTools(b);
   });
-  editorEl.addEventListener("focusout", (e) => {
+  floatEl.addEventListener("focusout", (e) => {
     const b = e.target.closest?.(".box");
     setTimeout(() => {
       if (b && b.isConnected && document.activeElement !== b && !b.textContent.trim() && !b.querySelector("img, hr, table")) {
@@ -1588,6 +1676,21 @@ function setupFreeMode() {
     }, 150);
   });
   setupBoxTools();
+}
+
+// Frei verschiebbares Textfeld dort, wo man gerade hinschaut
+function insertFloatText() {
+  const scroll = $("#canvasScroll");
+  const r = sheetEl.getBoundingClientRect();
+  const view = (scroll.getBoundingClientRect().top + scroll.clientHeight / 3 - r.top) / sheetScale;
+  // unter den vorhandenen Text, damit nichts übereinander liegt
+  const last = editorEl.lastElementChild;
+  const textEnd = last && last.textContent.trim() ? relTop(last) + last.getBoundingClientRect().height / sheetScale + LINE : CONTENT_TOP;
+  const b = newBox(insets(currentDoc()).l + 40, Math.max(CONTENT_TOP, view, textEnd), "<p><br></p>", { w: 300 });
+  b.focus();
+  caretInto(b.firstChild);
+  showBoxTools(b);
+  onEditorInput();
 }
 
 let activeBox = null;
@@ -1645,7 +1748,7 @@ function setupBoxTools() {
   };
   drag($(".bt-move", tools), (b, dx, dy, s) => {
     b.dataset.x = Math.max(0, Math.min(SHEET_BASE_WIDTH - 60, s.bx + dx));
-    b.dataset.y = Math.max(CONTENT_TOP, s.by + dy);
+    b.dataset.y = Math.max(isPdf(currentDoc()) ? 0 : CONTENT_TOP, s.by + dy);
   });
   drag($(".bt-resize", tools), (b, dx, _dy, s) => {
     b.dataset.w = Math.max(80, Math.min(SHEET_BASE_WIDTH - Number(b.dataset.x), s.bw + dx));
@@ -1690,7 +1793,7 @@ function setupImages() {
 }
 
 function selectImage(img) {
-  $$("img.selected", editorEl).forEach((i) => i.classList.remove("selected"));
+  $$("img.selected", sheetEl).forEach((i) => i.classList.remove("selected"));
   activeImg = img;
   const bar = $("#imgBar");
   if (!bar) return;
@@ -1729,7 +1832,7 @@ function insertImage() {
     if (!file) return;
     const src = await downscaleImage(file, 1600);
     const doc = currentDoc();
-    if (isFree(doc)) {
+    if (isPdf(doc)) {
       const b = newBox(insets(doc).l, nextFreeY(), `<img src="${src}" alt="">`, { cls: "img-box", w: 320 });
       showBoxTools(b);
       b.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1748,14 +1851,51 @@ function insertImage() {
 let savedRange = null;
 function rememberSelection() {
   const sel = getSelection();
-  if (editorEl && sel.rangeCount && editorEl.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+  if (editorEl && sel.rangeCount && inDoc(sel.getRangeAt(0).commonAncestorContainer)) {
     savedRange = sel.getRangeAt(0).cloneRange();
     updateFormatSelect();
   }
+  updateSelBar();
+}
+
+// Kleine Leiste direkt unter einem markierten Wort: Farbe, Textmarker, Fachbegriff
+function updateSelBar() {
+  let bar = $("#selBar");
+  const sel = getSelection();
+  const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+  const show = editorEl && ui.tool === "text" && range && !sel.isCollapsed && inDoc(range.commonAncestorContainer) && sel.toString().trim();
+  if (!show) {
+    if (bar && !bar.contains(document.activeElement)) bar.hidden = true;
+    return;
+  }
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "selBar";
+    bar.className = "sel-bar";
+    bar.innerHTML = `${TEXT_COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" data-sc="${c}" title="${n}"></button>`).join("")}
+      <label class="swatch rainbow" title="Alle Farben"><input type="color" id="selColor" value="#7d3cc8"></label>
+      <button class="sb-btn" data-sa="highlight" title="Textmarker">🖍</button>
+      <button class="sb-btn" data-sa="bold" title="Fett"><b>B</b></button>
+      <button class="sb-btn term" data-sa="term" title="Als Fachbegriff markieren">● Fachbegriff</button>`;
+    document.body.appendChild(bar);
+    $$("button", bar).forEach((b) => b.addEventListener("pointerdown", (e) => e.preventDefault()));
+    $$("[data-sc]", bar).forEach((b) => b.addEventListener("click", () => applyTextColor(b.dataset.sc)));
+    $$("[data-sa]", bar).forEach((b) => b.addEventListener("click", () => runCommand(b.dataset.sa)));
+    $("#selColor", bar).addEventListener("input", (e) => {
+      e.target.parentElement.style.setProperty("--picked", e.target.value);
+      applyTextColor(e.target.value);
+    });
+  }
+  bar.hidden = false;
+  const r = range.getBoundingClientRect();
+  const w = bar.offsetWidth;
+  bar.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + "px";
+  // unter die Markierung, damit das iPad-Menü (Kopieren …) oben frei bleibt
+  bar.style.top = Math.min(innerHeight - 52, r.bottom + 10) + "px";
 }
 
 function restoreSelection() {
-  if (!savedRange || !editorEl.contains(savedRange.commonAncestorContainer)) return focusEditorStart();
+  if (!savedRange || !inDoc(savedRange.commonAncestorContainer)) return focusEditorStart();
   const host = savedRange.commonAncestorContainer.nodeType === 1 ? savedRange.commonAncestorContainer : savedRange.commonAncestorContainer.parentElement;
   (host.closest(".box") || editorEl).focus();
   const sel = getSelection();
@@ -1772,8 +1912,8 @@ function applyTextColor(color) {
 
 function applyDocLook() {
   const doc = currentDoc();
-  sheetEl.classList.remove("paper-lined", "paper-blank", "paper-grid", "free", "flow");
-  sheetEl.classList.add(`paper-${doc.paper}`, isFree(doc) ? "free" : "flow");
+  sheetEl.classList.remove("paper-lined", "paper-blank", "paper-grid", "paper-pdf", "ruled", "flow");
+  sheetEl.classList.add(`paper-${doc.paper}`, isRuled(doc) ? "ruled" : "flow");
   const d = doc.design || {};
   const accent = d.accentColor || moduleColor(doc.moduleId);
   const ins = insets(doc);
@@ -1792,16 +1932,7 @@ function applyDocLook() {
 
 function focusEditorStart() {
   const doc = currentDoc();
-  if (isFree(doc)) {
-    const first = boxes()
-      .filter((b) => !b.classList.contains("img-box"))
-      .sort((a, b) => a.dataset.y - b.dataset.y)[0];
-    const b = first || newBox(insets(doc).l, CONTENT_TOP);
-    b.focus();
-    caretInto(b.lastElementChild || b);
-    showBoxTools(b);
-    return;
-  }
+  if (isPdf(doc)) return;
   editorEl.focus();
   if (!editorEl.firstChild) editorEl.innerHTML = "<p><br></p>";
   caretInto(editorEl.firstChild, false);
@@ -1989,7 +2120,8 @@ function openTextMenu(which, anchor) {
       { label: "▦ Tabelle", run: insertTable },
       { label: "☑ Checkliste", run: () => runCommand("checklist") },
       { label: "― Trennlinie", run: () => insertBlocks("<hr><p><br></p>") },
-      ...(isFree(doc) ? [] : [{ label: "⤓ Seitenumbruch", run: () => insertBlocks('<hr class="page-break"><p><br></p>') }]),
+      { label: "🔲 Textfeld (frei verschiebbar)", run: insertFloatText },
+      ...(isPdf(doc) ? [] : [{ label: "⤓ Seitenumbruch", run: () => insertBlocks('<hr class="page-break"><p><br></p>') }]),
       ...(cell
         ? [
             "-",
@@ -2017,8 +2149,8 @@ function openTextMenu(which, anchor) {
 // Fügt Blöcke an der Cursorstelle ein (Word-Modus) bzw. als neuen Block darunter (freies Feld)
 function insertBlocks(html) {
   const doc = currentDoc();
-  if (isFree(doc)) {
-    const host = savedRange && (savedRange.startContainer.nodeType === 1 ? savedRange.startContainer : savedRange.startContainer.parentElement)?.closest(".box");
+  const host = savedRange && (savedRange.startContainer.nodeType === 1 ? savedRange.startContainer : savedRange.startContainer.parentElement)?.closest(".box");
+  if (host || isPdf(doc)) {
     if (host && !host.classList.contains("img-box")) {
       restoreSelection();
       document.execCommand("insertHTML", false, html);
@@ -2039,7 +2171,7 @@ function insertBlocks(html) {
 function appendBlocks(html) {
   const doc = currentDoc();
   let host = editorEl;
-  if (isFree(doc)) {
+  if (isPdf(doc)) {
     host = newBox(insets(doc).l, nextFreeY(), "");
     showBoxTools(host);
   }
@@ -2140,14 +2272,14 @@ function applyFontSize(pt) {
 
 // execCommand erzeugt <font>-Tags – wir machen daraus saubere <span>s, Schriftart bleibt immer gleich
 function normalizeFonts() {
-  for (const f of $$("font", editorEl)) {
+  for (const f of [...$$("font", editorEl), ...$$("font", floatEl)]) {
     const span = document.createElement("span");
     if (f.getAttribute("size") === "7" && ui.pendingFontSize) span.style.fontSize = ui.pendingFontSize + "pt";
     if (f.getAttribute("color")) span.style.color = f.getAttribute("color");
     span.append(...f.childNodes);
     f.replaceWith(span);
   }
-  for (const s of $$('span[style*="xxx-large"]', editorEl)) {
+  for (const s of [...$$('span[style*="xxx-large"]', editorEl), ...$$('span[style*="xxx-large"]', floatEl)]) {
     s.style.fontSize = ui.pendingFontSize ? ui.pendingFontSize + "pt" : "";
   }
 }
@@ -2156,10 +2288,10 @@ function toggleTerm() {
   const sel = getSelection();
   if (!sel.rangeCount) return;
   const range = sel.getRangeAt(0);
-  if (!editorEl.contains(range.commonAncestorContainer)) return;
+  if (!inDoc(range.commonAncestorContainer)) return;
   const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
   const existing = startEl.closest("span.term");
-  if (existing && editorEl.contains(existing)) {
+  if (existing && inDoc(existing)) {
     existing.replaceWith(...existing.childNodes);
   } else if (!sel.isCollapsed) {
     const span = document.createElement("span");
@@ -2231,7 +2363,7 @@ function onEditorPaste(e) {
   e.preventDefault();
   if (file) {
     downscaleImage(file, 1600).then((src) => {
-      if (isFree(currentDoc())) {
+      if (isPdf(currentDoc())) {
         const b = newBox(insets(currentDoc()).l, nextFreeY(), `<img src="${src}" alt="">`, { cls: "img-box", w: 320 });
         showBoxTools(b);
       } else document.execCommand("insertHTML", false, `<img src="${src}" alt="" style="width:60%">`);
@@ -2253,6 +2385,7 @@ const onEditorInput = (() => {
     const doc = currentDoc();
     if (!doc || !editorEl) return;
     doc.html = editorEl.innerHTML;
+    doc.floats = floatEl.innerHTML;
     touchDoc();
     paginate();
     positionFloatBars();
@@ -2280,7 +2413,7 @@ function updateSavedState(text) {
 // ---------- Blöcke & Verbesserung ----------
 
 // Wo die Absätze liegen: im Word-Modus direkt im Blatt, im freien Feld in den Textblöcken
-const containers = () => (editorEl ? (isFree(currentDoc()) ? boxes().filter((b) => !b.classList.contains("img-box")) : [editorEl]) : []);
+const containers = () => (editorEl ? [...(isPdf(currentDoc()) ? [] : [editorEl]), ...boxes().filter((b) => !b.classList.contains("img-box"))] : []);
 const allBlocks = () => containers().flatMap((c) => [...c.children]);
 const findBlock = (bid) => allBlocks().find((el) => el.dataset.bid === bid) || null;
 
@@ -2314,6 +2447,7 @@ function normalizeBlocks() {
     for (const el of c.children) if (!el.dataset.bid) el.dataset.bid = uid().slice(0, 8);
   }
   currentDoc().html = editorEl.innerHTML;
+  currentDoc().floats = floatEl.innerHTML;
 }
 
 // Browser verschachteln Listen/Überschriften manchmal in <p> – wieder auf eine Ebene holen
@@ -2332,10 +2466,10 @@ const blockHash = (el) => hash(el.tagName + el.textContent + "|" + [...el.queryS
 
 function blockElements(doc) {
   if (editorEl && ui.docId === doc.id) return allBlocks();
+  migrateDoc(doc);
   const box = document.createElement("div");
-  box.innerHTML = doc.html;
-  const hosts = box.querySelector(":scope > .box") ? $$(":scope > .box:not(.img-box)", box) : [box];
-  return hosts.flatMap((h) => [...h.children]);
+  box.innerHTML = doc.html + (doc.floats || "");
+  return [...box.children].flatMap((el) => (el.classList.contains("box") ? (el.classList.contains("img-box") ? [] : [...el.children]) : [el]));
 }
 
 function pendingBlocks(doc) {
@@ -2345,7 +2479,7 @@ function pendingBlocks(doc) {
 
 function termsInDoc() {
   const seen = new Map();
-  for (const t of $$("span.term", editorEl)) {
+  for (const t of [...$$("span.term", editorEl), ...$$("span.term", floatEl)]) {
     const term = t.textContent.trim().replace(/[.,;:!?]+$/, "");
     if (term && !seen.has(term.toLowerCase())) seen.set(term.toLowerCase(), term);
   }
@@ -2662,7 +2796,7 @@ function insertToc() {
     if (h.tagName === "H2") li.style.marginLeft = "18px";
     ul.appendChild(li);
   }
-  const host = isFree(currentDoc()) ? containers().sort((a, b) => a.dataset.y - b.dataset.y)[0] : editorEl;
+  const host = isPdf(currentDoc()) ? containers().sort((a, b) => a.dataset.y - b.dataset.y)[0] : editorEl;
   host?.prepend(title, ul);
 }
 
@@ -2753,7 +2887,7 @@ async function toolbarAction(a) {
 async function leaveEditor() {
   if (ui.view !== "editor" || !currentDoc()) return;
   const doc = currentDoc();
-  if (!editorEl.textContent.trim() && !editorEl.querySelector("img") && !doc.strokes.length && doc.title === `${KINDS[doc.kind].label} ${fmtShort(doc.createdAt)}`) {
+  if (!editorEl.textContent.trim() && !floatEl.textContent.trim() && !sheetEl.querySelector("img") && !doc.strokes.length && doc.title === `${KINDS[doc.kind].label} ${fmtShort(doc.createdAt)}`) {
     state.docs = state.docs.filter((d) => d.id !== doc.id); // leeres Blatt nicht aufheben
     await writeState();
   } else {
@@ -2763,7 +2897,8 @@ async function leaveEditor() {
   fitObs?.disconnect();
   document.removeEventListener("selectionchange", rememberSelection);
   $$(".pop").forEach((p) => p.remove());
-  editorEl = sheetEl = canvasEl = null;
+  $("#selBar")?.setAttribute("hidden", "");
+  editorEl = floatEl = sheetEl = canvasEl = null;
   activeBox = activeImg = null;
   lastPages = 0;
   ui.view = "files";
@@ -2969,12 +3104,13 @@ function setupCanvas() {
   const ctx = () => canvasEl.getContext("2d");
 
 
-  canvasEl.addEventListener("pointerdown", (e) => {
-    if (ui.tool !== "pen") return;
+  const startDraw = (e) => {
     if (e.pointerType === "pen") sawPen = true;
     if (e.pointerType === "touch" && sawPen) return; // Handballen ignorieren
     e.preventDefault();
-    canvasEl.setPointerCapture(e.pointerId);
+    try {
+      sheetEl.setPointerCapture(e.pointerId);
+    } catch {}
     const pt = pointFrom(e);
     const { kind, color, width, shape } = ui.pen;
     if (kind === "lasso") {
@@ -3001,9 +3137,21 @@ function setupCanvas() {
     if (kind === "pen") current.tool = ui.pen.tool;
     if (kind === "pen" && e.pointerType === "pen") current.pressure = true;
     drawStroke(ctx(), current, sheetEl.clientWidth);
-  });
+  };
+  canvasEl.addEventListener("pointerdown", (e) => ui.tool === "pen" && startDraw(e));
+  // Apple Pencil zeichnet immer – auch im Schreib-Modus. Finger & Tastatur schreiben weiter.
+  sheetEl.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (ui.tool !== "text" || e.pointerType !== "pen" || state.settings.pencilDraws === false) return;
+      if (e.target.closest(".box-tools, .float-bar, .sel-bar, .doc-title")) return;
+      e.stopPropagation();
+      startDraw(e);
+    },
+    true
+  );
 
-  canvasEl.addEventListener("pointermove", (e) => {
+  sheetEl.addEventListener("pointermove", (e) => {
     const pt = pointFrom(e);
     const W = sheetEl.clientWidth;
     if (lassoPath) {
@@ -3082,8 +3230,8 @@ function setupCanvas() {
     redrawCanvas();
     touchDoc();
   };
-  canvasEl.addEventListener("pointerup", end);
-  canvasEl.addEventListener("pointercancel", end);
+  sheetEl.addEventListener("pointerup", end);
+  sheetEl.addEventListener("pointercancel", end);
 }
 
 // Ganze Striche entfernen, die der Radiergummi berührt
@@ -3617,9 +3765,9 @@ function renderDesignPanel(panel) {
             ${t.label}</button>`;
         })
         .join("")}</div>
-      <div class="field"><span>Blatt</span><div class="hint">${PAPERS[doc.paper] || "Importierte Datei"} – beim Erstellen festgelegt${isFree(doc) ? " · Textblöcke frei verschiebbar (⠿)" : " · fließender Text wie in Word"}</div></div>
+      <div class="field"><span>Blatt</span><div class="hint">${PAPERS[doc.paper] || "Importierte Datei"} – beim Erstellen festgelegt · schreibt sich wie Word, Textfelder über ＋ Einfügen</div></div>
       ${
-        isFree(doc)
+        doc.paper !== "blank"
           ? ""
           : `<div class="field"><span>Seitenränder</span>
         <label class="range-row">Links <input type="range" min="1" max="5" step="0.25" data-m="l" value="${doc.margins.l}"><b>${doc.margins.l} cm</b></label>
@@ -3872,6 +4020,7 @@ function showCandidates(lines) {
 // ---------- Kalender ----------
 
 const DAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+const EVENT_TYPES = ["Vorlesung", "Seminar", "Übung", "Tutorium", "Kolloquium", "Praktikum", "Sonstiges"];
 const toMin = (t) => {
   const [h, m] = (t || "0:0").split(":").map(Number);
   return h * 60 + (m || 0);
@@ -3910,7 +4059,7 @@ function renderCalendar() {
         const m = moduleById(e.moduleId);
         return `<div class="cal-entry" data-entry="${e.id}" role="button" tabindex="0"
           style="top:${top(toMin(e.start))}px;height:${Math.max(26, (toMin(e.end) - toMin(e.start)) * PX - 2)}px;left:calc(${(e._lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:${esc(m.color)}">
-          <b>${esc(m.name)}</b><small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
+          <b>${esc(m.name)}</b>${e.type ? `<small class="cal-type">${esc(e.type)}</small>` : ""}<small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
           <button class="cal-edit" data-edit="${e.id}" title="Bearbeiten">✎</button></div>`;
       })
       .join("");
@@ -3961,6 +4110,9 @@ async function entryDialog(entry) {
       ${mods.map((m) => `<option value="${m.id}" ${m.id === entry.moduleId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}
       <option value="__new">＋ Neues Modul …</option></select></label>
     <label class="field" id="enNewWrap" ${mods.length ? "hidden" : ""}><span>Name des neuen Moduls</span><input class="input" id="enNew"></label>
+    <div class="field"><span>Art der Veranstaltung</span><div class="chip-wrap" id="enType">${EVENT_TYPES.map(
+      (t) => `<button class="chip ${t === (entry.type || "Vorlesung") ? "on" : ""}" data-type="${t}">${t}</button>`
+    ).join("")}</div></div>
     <label class="field"><span>Tag</span><select class="input" id="enDay">${DAYS.map((d, i) => `<option value="${i}" ${i === (entry.day ?? 0) ? "selected" : ""}>${d}</option>`).join("")}</select></label>
     <div style="display:flex;gap:10px">
       <label class="field" style="flex:1"><span>Von</span><input class="input" type="time" id="enStart" value="${esc(entry.start || "10:00")}"></label>
@@ -3972,6 +4124,14 @@ async function entryDialog(entry) {
   const modSel = $("#enMod", m);
   if (!mods.length) modSel.value = "__new";
   modSel.onchange = () => ($("#enNewWrap", m).hidden = modSel.value !== "__new");
+  let type = entry.type || "Vorlesung";
+  $$("#enType [data-type]", m).forEach(
+    (b) =>
+      (b.onclick = () => {
+        type = b.dataset.type;
+        $$("#enType [data-type]", m).forEach((x) => x.classList.toggle("on", x === b));
+      })
+  );
   $("[data-x]", m).onclick = () => m.close(null);
   $("[data-del]", m)?.addEventListener("click", () => m.close("delete"));
   $("[data-ok]", m).onclick = () => {
@@ -3984,7 +4144,7 @@ async function entryDialog(entry) {
     const start = $("#enStart", m).value;
     const end = $("#enEnd", m).value;
     if (!start || !end || toMin(end) <= toMin(start)) return toast("Bitte gültige Uhrzeiten eingeben.");
-    m.close({ moduleId, day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
+    m.close({ moduleId, type, day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
   };
   const res = await p;
   if (!res) return;
@@ -4086,8 +4246,9 @@ const EXPORT_CSS = `
   @media print { html, body { background: none; } .ex-page { margin: 0; } .ex-page .bg-page { box-shadow: none; border-radius: 0; } }`;
 
 function docTerms(doc) {
+  migrateDoc(doc);
   const box = document.createElement("div");
-  box.innerHTML = doc.html;
+  box.innerHTML = doc.html + (doc.floats || "");
   const map = new Map();
   for (const t of box.querySelectorAll("span.term")) {
     const term = t.textContent.trim().replace(/[.,;:!?]+$/, "");
@@ -4111,65 +4272,62 @@ function docVars(doc) {
 
 // Inhalt ohne freie Blöcke (für Word, Markdown, Text): Blöcke von oben nach unten
 function flatHtml(doc) {
+  migrateDoc(doc);
   const box = document.createElement("div");
-  box.innerHTML = sanitizeHtml(doc.html);
-  const blocks = $$(":scope > .box", box);
-  if (!blocks.length) return stripBids(box.innerHTML);
-  return stripBids(
-    blocks
-      .sort((a, b) => a.dataset.y - b.dataset.y || a.dataset.x - b.dataset.x)
-      .map((b) => (b.classList.contains("img-box") ? b.innerHTML.replace("<img ", '<img style="width:60%" ') : b.innerHTML))
-      .join("")
-  );
+  box.innerHTML = sanitizeHtml(doc.floats || "");
+  const floats = $$(":scope > .box:not(.locked)", box)
+    .sort((a, b) => a.dataset.y - b.dataset.y || a.dataset.x - b.dataset.x)
+    .map((b) => (b.classList.contains("img-box") ? b.innerHTML.replace("<img ", '<img style="width:60%" ') : b.innerHTML));
+  return stripBids(sanitizeHtml(doc.html) + floats.join(""));
 }
 
 // Baut das Blatt unsichtbar auf, rechnet die Seiten aus und teilt alles auf echte A4-Seiten auf
 function docToPagesHtml(doc) {
-  const free = isFree(doc);
+  migrateDoc(doc);
+  const cls = `paper-${doc.paper} ${isRuled(doc) ? "ruled" : "flow"}`;
   const host = document.createElement("div");
   host.style.cssText = "position:fixed;left:-30000px;top:0;visibility:hidden;pointer-events:none";
-  host.innerHTML = `<div class="sheet paper-${doc.paper} ${free ? "free" : "flow"}" style="${docVars(doc)}">
-    <div class="sheet-bg"></div><div class="doc-title">${esc(docHeading(doc))}</div><div class="page-content">${sanitizeHtml(doc.html)}</div></div>`;
+  host.innerHTML = `<div class="sheet ${cls}" style="${docVars(doc)}">
+    <div class="sheet-bg"></div><div class="doc-title">${esc(docHeading(doc))}</div><div class="page-content">${isPdf(doc) ? "" : sanitizeHtml(doc.html)}</div>
+    <div class="float-layer">${sanitizeHtml(doc.floats || "")}</div></div>`;
   document.body.appendChild(host);
   const sheet = host.firstElementChild;
   const editor = $(".page-content", sheet);
-  $$(":scope > .box", editor).forEach(placeBox);
-  const pages = layoutPages(sheet, editor, { ...doc, pages: doc.pages || 1 }, 1);
+  const floats = $(".float-layer", sheet);
+  $$(":scope > .box", floats).forEach(placeBox);
+  const pages = layoutPages(sheet, editor, { ...doc, pages: doc.pages || 1 }, 1, floats);
   const pageOf = (el) => Math.max(0, Math.min(pages - 1, Math.floor((el.getBoundingClientRect().top - sheet.getBoundingClientRect().top + 1) / STRIDE)));
   const content = Array.from({ length: pages }, () => []);
+  const floatContent = Array.from({ length: pages }, () => []);
   const clean = (el) => {
     const c = el.cloneNode(true);
     c.style.marginTop = "";
     $$("[style]", c).forEach((x) => (x.style.marginTop = ""));
     return c;
   };
-
-  if (free) {
-    for (const b of $$(":scope > .box", editor)) {
-      const y = Number(b.dataset.y);
-      const n = Math.max(0, Math.min(pages - 1, Math.floor(y / STRIDE)));
-      const c = clean(b);
-      Object.assign(c.style, { left: b.dataset.x + "px", top: y - n * STRIDE + "px", width: b.dataset.w + "px" });
-      content[n].push(c.outerHTML);
-    }
-  } else {
-    for (const el of [...editor.children]) {
-      if (/^(UL|OL)$/.test(el.tagName)) {
-        let group = null;
-        let groupPage = -1;
-        [...el.children].forEach((li, i) => {
-          const n = pageOf(li);
-          if (n !== groupPage) {
-            group = el.cloneNode(false);
-            group.style.marginTop = "";
-            if (el.tagName === "OL" && i) group.setAttribute("start", i + 1);
-            content[n].push(group);
-            groupPage = n;
-          }
-          group.appendChild(clean(li));
-        });
-      } else content[pageOf(el)].push(clean(el));
-    }
+  for (const el of [...editor.children]) {
+    if (/^(UL|OL)$/.test(el.tagName)) {
+      let group = null;
+      let groupPage = -1;
+      [...el.children].forEach((li, i) => {
+        const n = pageOf(li);
+        if (n !== groupPage) {
+          group = el.cloneNode(false);
+          group.style.marginTop = "";
+          if (el.tagName === "OL" && i) group.setAttribute("start", i + 1);
+          content[n].push(group);
+          groupPage = n;
+        }
+        group.appendChild(clean(li));
+      });
+    } else content[pageOf(el)].push(clean(el));
+  }
+  for (const b of $$(":scope > .box", floats)) {
+    const y = Number(b.dataset.y);
+    const n = Math.max(0, Math.min(pages - 1, Math.floor(y / STRIDE)));
+    const c = b.cloneNode(true);
+    Object.assign(c.style, { left: b.dataset.x + "px", top: y - n * STRIDE + "px", width: b.dataset.w + "px" });
+    floatContent[n].push(c.outerHTML);
   }
   host.remove();
 
@@ -4177,12 +4335,12 @@ function docToPagesHtml(doc) {
   const terms = docTerms(doc);
   const pagesHtml = content.map((items, n) => {
     const html = items.map((x) => (typeof x === "string" ? x : x.outerHTML)).join("");
-    const pos = free ? "left:0;right:0;top:0" : `left:${ins.l}px;right:${ins.r}px;top:${n ? PAGE_TOP : CONTENT_TOP}px`;
     const drawing = renderStrokesForPage(doc, n);
-    return `<section class="ex-page sheet paper-${doc.paper} ${free ? "free" : "flow"}" style="${docVars(doc)}">
+    return `<section class="ex-page sheet ${cls}" style="${docVars(doc)}">
       <div class="sheet-bg"><div class="bg-page"><div class="pg-lines" style="top:${n ? 0 : CONTENT_TOP}px"></div><span class="pg-num">${n + 1}</span></div></div>
-      ${n === 0 && doc.paper !== "pdf" ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div><div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px">${esc(docHeading(doc))}</div>` : ""}
-      <div class="page-content" style="position:absolute;${pos}">${stripBids(html)}</div>
+      <div class="page-content" style="position:absolute;left:${ins.l}px;right:${ins.r}px;top:${n ? PAGE_TOP : CONTENT_TOP}px">${stripBids(html)}</div>
+      <div class="float-layer">${stripBids(floatContent[n].join(""))}</div>
+      ${n === 0 ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div>${isPdf(doc) ? "" : `<div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px">${esc(docHeading(doc))}</div>`}` : ""}
       ${drawing ? `<img class="drawing" src="${drawing}" alt="">` : ""}
     </section>`;
   });
@@ -4347,8 +4505,8 @@ async function settingsDialog() {
       ]
         .map(([k, l]) => `<button data-theme-opt="${k}" class="${(s.theme || "auto") === k ? "on" : ""}">${l}</button>`)
         .join("")}</div>
-      <label class="check-row" style="border:0;padding:6px 0 0"><input type="checkbox" id="setDarkPaper" ${s.darkPaper !== false ? "checked" : ""}><span>Blätter im Dark Mode auch dunkel anzeigen</span></label>
     </div>
+    <label class="check-row" style="border:0;padding:0 0 12px"><input type="checkbox" id="setPencil" ${s.pencilDraws !== false ? "checked" : ""}><span><b>Apple Pencil zeichnet immer</b><small>Auch im Schreib-Modus malt der Stift, Finger & Tastatur schreiben.</small></span></label>
     <label class="field"><span>Standard-Blatt</span><select class="input" id="setPaper">${Object.entries(PAPERS)
       .map(([k, v]) => `<option value="${k}" ${k === s.paper ? "selected" : ""}>${v}</option>`)
       .join("")}</select></label>
@@ -4376,6 +4534,7 @@ async function settingsDialog() {
   $("#setFont", m).onchange = (e) => ((s.font = e.target.value), applySettings());
   $("#setSize", m).onchange = (e) => ((s.fontSize = Number(e.target.value)), applySettings());
   $("#setPaper", m).onchange = (e) => ((s.paper = e.target.value), persist());
+  $("#setPencil", m).onchange = (e) => ((s.pencilDraws = e.target.checked), persist());
   $$("[data-theme-opt]", m).forEach(
     (b) =>
       (b.onclick = () => {
@@ -4384,7 +4543,6 @@ async function settingsDialog() {
         applySettings();
       })
   );
-  $("#setDarkPaper", m).onchange = (e) => ((s.darkPaper = e.target.checked), applySettings());
   $("#renSem", m).onclick = async () => {
     m.close();
     const name = await promptModal("Semester umbenennen", "Name", sem.name);
@@ -4437,8 +4595,7 @@ function applyTheme() {
   const t = state.settings.theme || "auto";
   const dark = t === "dark" || (t === "auto" && darkQuery.matches);
   document.documentElement.dataset.theme = dark ? "dark" : "light";
-  document.documentElement.toggleAttribute("data-darkpaper", state.settings.darkPaper !== false);
-  localStorage.setItem("nh-theme", JSON.stringify({ t, p: state.settings.darkPaper !== false }));
+  localStorage.setItem("nh-theme", JSON.stringify({ t }));
 }
 darkQuery.addEventListener?.("change", () => state && applyTheme());
 
