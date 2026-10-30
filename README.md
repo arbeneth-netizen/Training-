@@ -7,12 +7,15 @@ Eine eigene Notiz-Website im Stil von Apple Pages, gebaut fürs schnelle Schreib
 ```bash
 npm install
 export ANTHROPIC_API_KEY=sk-ant-...   # für die KI-Funktionen
+export APP_PASSWORD=dein-passwort     # optional: Passwortschutz
 npm start
 ```
 
 Dann im Browser **http://localhost:3000** öffnen.
 
 Ohne API-Schlüssel funktioniert alles außer den KI-Funktionen (Verbessern, Fachbegriffe erklären, Stundenplan scannen, Chatbot).
+
+Ist `APP_PASSWORD` gesetzt, zeigt die Seite zuerst eine Passwortabfrage. Nach der Anmeldung merkt sich der Browser das ein Jahr lang. Online (z. B. bei Render) immer ein Passwort setzen, sonst kann jeder mit dem Link den Chatbot auf deine Kosten nutzen.
 
 ## Funktionen
 

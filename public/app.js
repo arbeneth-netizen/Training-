@@ -54,6 +54,10 @@ async function api(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (res.status === 401) {
+    location.reload(); // Anmeldung abgelaufen → Passwortseite
+    throw new Error("Bitte erneut anmelden.");
+  }
   const data = await res.json().catch(() => ({ error: "Ungültige Antwort vom Server" }));
   if (!res.ok) throw new Error(data.error || "Fehler bei der KI-Anfrage");
   return data;
