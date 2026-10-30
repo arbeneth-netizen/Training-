@@ -261,8 +261,10 @@ function createDoc({ moduleId = null, folderId = null, kind = "notes", paper, ti
 // HTML säubern (für Import und Einfügen)
 // ============================================================
 
-const ALLOWED_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "UL", "OL", "LI", "B", "STRONG", "I", "EM", "U", "BR", "SPAN"]);
-const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "IMG", "SVG", "VIDEO", "AUDIO", "FORM", "INPUT", "BUTTON", "TEXTAREA", "SELECT"]);
+const ALLOWED_TAGS = new Set(["P", "DIV", "H1", "H2", "H3", "UL", "OL", "LI", "B", "STRONG", "I", "EM", "U", "S", "SUP", "SUB", "BR", "SPAN", "HR", "IMG", "TABLE", "TBODY", "THEAD", "TR", "TD", "TH"]);
+const DROP_TAGS = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "EMBED", "LINK", "META", "SVG", "VIDEO", "AUDIO", "FORM", "INPUT", "BUTTON", "TEXTAREA", "SELECT"]);
+const KEEP_CLASSES = ["term", "box", "img-box", "checklist", "page-break", "tbl"];
+const KEEP_DATA = ["bid", "toc", "x", "y", "w", "checked"];
 
 function cleanNode(node) {
   for (const child of [...node.childNodes]) {
@@ -271,14 +273,20 @@ function cleanNode(node) {
       child.remove();
       continue;
     }
-    if (DROP_TAGS.has(child.tagName)) {
+    if (DROP_TAGS.has(child.tagName) || (child.tagName === "IMG" && !/^data:image\/(png|jpeg|gif|webp);base64,/.test(child.getAttribute("src") || ""))) {
       child.remove();
       continue;
     }
     cleanNode(child);
+    if (child.tagName === "STRIKE" || child.tagName === "DEL") {
+      const sEl = document.createElement("s");
+      sEl.append(...child.childNodes);
+      child.replaceWith(sEl);
+      continue;
+    }
     if (!ALLOWED_TAGS.has(child.tagName)) {
       const tag = child.tagName;
-      const isBlock = /^(H[4-6]|SECTION|ARTICLE|HEADER|FOOTER|BLOCKQUOTE|PRE|TABLE|TR)$/.test(tag);
+      const isBlock = /^(H[4-6]|SECTION|ARTICLE|HEADER|FOOTER|BLOCKQUOTE|PRE)$/.test(tag);
       if (isBlock) {
         const p = document.createElement(/^H[4-6]$/.test(tag) ? "h3" : "p");
         p.append(...child.childNodes);
@@ -288,17 +296,26 @@ function cleanNode(node) {
       }
       continue;
     }
-    const color = child.style?.color;
-    const fontSize = child.style?.fontSize;
-    const isTerm = child.classList?.contains("term");
-    const bid = child.getAttribute("data-bid");
-    const toc = child.getAttribute("data-toc");
+    const st = child.style || {};
+    const keep = {
+      color: st.color,
+      "font-size": /^\d+(\.\d+)?(pt|px)$/.test(st.fontSize || "") ? st.fontSize : "",
+      "background-color": st.backgroundColor,
+      "text-align": /^(left|center|right|justify)$/.test(st.textAlign || "") ? st.textAlign : "",
+      "padding-left": /^\d+px$/.test(st.paddingLeft || "") ? st.paddingLeft : "",
+      width: child.tagName === "IMG" && /^\d+(\.\d+)?%$/.test(st.width || "") ? st.width : "",
+    };
+    const classes = KEEP_CLASSES.filter((c) => child.classList?.contains(c));
+    const data = KEEP_DATA.map((k) => [k, child.getAttribute("data-" + k)]).filter(([, v]) => v !== null);
+    const src = child.tagName === "IMG" ? child.getAttribute("src") : null;
     for (const attr of [...child.attributes]) child.removeAttribute(attr.name);
-    if (isTerm) child.className = "term";
-    if (color) child.style.color = color;
-    if (fontSize && /^\d+(\.\d+)?(pt|px)$/.test(fontSize)) child.style.fontSize = fontSize;
-    if (bid) child.setAttribute("data-bid", bid);
-    if (toc) child.setAttribute("data-toc", toc);
+    if (classes.length) child.className = classes.join(" ");
+    for (const [k, v] of Object.entries(keep)) if (v) child.style.setProperty(k, v);
+    for (const [k, v] of data) child.setAttribute("data-" + k, v);
+    if (src) {
+      child.setAttribute("src", src);
+      child.setAttribute("alt", "");
+    }
   }
 }
 
@@ -935,11 +952,33 @@ let sheetEl = null;
 let canvasEl = null;
 let resizeObs = null;
 
+// Seitenmaße – alles Vielfache der Zeilenhöhe, damit die Linien über alle Seiten passen
+const LINE = 28;
+const PAGE_H = 1120; // 40 Zeilen ≈ A4
+const PAGE_GAP = 28;
+const STRIDE = PAGE_H + PAGE_GAP;
+const CONTENT_TOP = 112; // Datum + Überschrift auf Seite 1
+const PAGE_TOP = 56;
+const PAGE_BOTTOM = 56;
+const CM = 37.8;
+
+// Liniert & kariert = freies Feld (Textblöcke frei verschiebbar), leeres Blatt = wie Word
+const isFree = (doc) => doc.paper !== "blank";
+
+function insets(doc) {
+  if (isFree(doc)) return { l: 64, r: 104 };
+  const m = doc.margins || {};
+  return { l: Math.round((m.l ?? 2.5) * CM), r: Math.round((m.r ?? 2.5) * CM) };
+}
+
 function openDoc(id) {
   const doc = docById(id);
   if (!doc) return;
   doc.heading ??= doc.moduleId ? moduleName(doc.moduleId) : "";
   doc.mode ??= "notes";
+  doc.margins ??= { l: 2.5, r: 2.5 };
+  doc.spacing ??= 1.5;
+  doc.pages ??= 1;
   ui.view = "editor";
   ui.docId = id;
   ui.tool = "text";
@@ -970,24 +1009,39 @@ function renderEditor(main) {
           <button data-tool="pen">✎ Stift</button>
         </div>
         <button class="tb" data-a="tidy" title="Rechtschreibung prüfen & aufräumen">✨<span class="lbl"> Aufräumen</span></button>
-        <button class="tb" data-a="design" title="Design & Blatt (liniert, kariert …)">🎨<span class="lbl"> Design</span></button>
-        <button class="tb" data-a="export" title="Exportieren">⤓<span class="lbl"> Export</span></button>
+        <button class="tb" data-a="design" title="Design & Layout">🎨<span class="lbl"> Design</span></button>
         <span class="saved-state" id="savedState"></span>
         <button class="btn primary" data-a="save" title="Speichern (${MOD}+S)">Speichern</button>
+        <button class="tb" data-a="export" title="Exportieren">⤓<span class="lbl"> Export</span></button>
       </div>
       <div class="subbar" id="subbar"></div>
       <div class="editor-body">
         <div class="canvas-scroll" id="canvasScroll">
-          <div class="sheet-zoom" id="sheetZoom"><div class="sheet" id="sheet">
-            <div class="sheet-date">${esc(fmtLong(Date.now()))}${
-              sameDay(doc.createdAt, Date.now()) ? "" : `<small>Erstellt am ${esc(fmtShort(doc.createdAt))}</small>`
-            }</div>
-            <input class="doc-title" id="docTitle" value="${esc(doc.heading)}" placeholder="Überschrift" autocomplete="off" spellcheck="true" autocapitalize="sentences">
-            <div class="page-content" id="editor" contenteditable="true" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="de"
-              data-placeholder="Einfach lostippen …   # Überschrift · - Liste · rot = Fachbegriff (${MOD}+Shift+F)"></div>
-            <div class="glossary" id="glossary"></div>
-            <canvas class="draw-layer" id="drawLayer"></canvas>
+          <div class="sheet-zoom" id="sheetZoom"><div class="sheet-stack" id="sheetStack">
+            <div class="sheet" id="sheet">
+              <div class="sheet-bg" id="sheetBg"></div>
+              <div class="sheet-date">${esc(fmtLong(Date.now()))}${
+                sameDay(doc.createdAt, Date.now()) ? "" : `<small>Erstellt am ${esc(fmtShort(doc.createdAt))}</small>`
+              }</div>
+              <input class="doc-title" id="docTitle" value="${esc(doc.heading)}" placeholder="Überschrift" autocomplete="off" spellcheck="true" autocapitalize="sentences">
+              <div class="page-content" id="editor" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="de"
+                data-placeholder="${isFree(doc) ? "Irgendwo aufs Blatt tippen und losschreiben …" : "Einfach lostippen …   # Überschrift · - Liste · rot = Fachbegriff"}"></div>
+              <canvas class="draw-layer" id="drawLayer"></canvas>
+              <div class="box-tools" id="boxTools" hidden>
+                <button class="bt-move" title="Verschieben">⠿</button>
+                <button class="bt-del" title="Block löschen">✕</button>
+                <span class="bt-resize" title="Breite ändern"></span>
+              </div>
+              <div class="float-bar" id="lassoBar" hidden><button data-l="delete">🗑 Löschen</button><span>oder ziehen zum Verschieben</span></div>
+              <div class="float-bar" id="imgBar" hidden>
+                <button data-iw="25">25 %</button><button data-iw="50">50 %</button><button data-iw="75">75 %</button><button data-iw="100">100 %</button>
+                <button data-ia="left" title="Links">⇤</button><button data-ia="center" title="Mitte">⇹</button><button data-ia="right" title="Rechts">⇥</button>
+                <button data-idel title="Bild löschen">🗑</button>
+              </div>
+            </div>
+            <div class="glossary-page"><div class="glossary" id="glossary"></div></div>
           </div></div>
+          <div class="doc-stats" id="docStats"></div>
         </div>
         <aside class="side-panel" id="sidePanel" hidden></aside>
       </div>
@@ -1000,12 +1054,20 @@ function renderEditor(main) {
   document.execCommand("defaultParagraphSeparator", false, "p");
 
   applyDocLook();
+  if (isFree(doc)) setupFreeMode();
+  else {
+    editorEl.contentEditable = "true";
+    editorEl.addEventListener("focus", () => {
+      if (!editorEl.textContent && !editorEl.querySelector("li, h1, h2, h3, img, table, hr")) focusEditorStart();
+    });
+  }
   renderModeSeg();
   renderToolSeg();
   renderSubbar();
   renderGlossary();
   renderSidePanel();
   setupCanvas();
+  setupImages();
   updateSavedState();
 
   $("#docTitle", main).addEventListener("input", (e) => {
@@ -1028,14 +1090,13 @@ function renderEditor(main) {
   editorEl.addEventListener("input", onEditorInput);
   editorEl.addEventListener("keydown", onEditorKeydown);
   editorEl.addEventListener("paste", onEditorPaste);
-  editorEl.addEventListener("focus", () => {
-    if (!editorEl.textContent && !editorEl.querySelector("li, h1, h2, h3")) focusEditorStart();
-  });
+  editorEl.addEventListener("click", onEditorClick);
 
   document.addEventListener("selectionchange", rememberSelection);
   setupFit();
+  paginate();
   $("#focusBtn").classList.toggle("on", document.body.classList.contains("focus"));
-  if (!doc.html) setTimeout(() => (doc.heading ? focusEditorStart() : $("#docTitle").focus()), 30);
+  if (!editorEl.textContent.trim() && !editorEl.querySelector("img")) setTimeout(() => (doc.heading ? focusEditorStart() : $("#docTitle").focus()), 30);
 }
 
 // Vollbild: Seitenleisten weg, Blatt so groß wie möglich (Hoch- und Querformat)
@@ -1053,40 +1114,388 @@ function toggleFocus(force) {
 let fitObs = null;
 let sheetScale = 1;
 
-// Blatt immer passend zur Bildschirmbreite skalieren – das Layout bleibt gleich, Zeichnungen bleiben an ihrem Platz
+// Blatt passend zur Bildschirmbreite skalieren – das Layout bleibt gleich, Zeichnungen bleiben an ihrem Platz
 function setupFit() {
   fitObs?.disconnect();
   const scroll = $("#canvasScroll");
   const zoom = $("#sheetZoom");
+  const stack = $("#sheetStack");
   const fit = () => {
     if (!sheetEl) return;
     const avail = scroll.clientWidth - (scroll.clientWidth < 700 ? 16 : 48);
     sheetScale = Math.max(0.35, Math.min(1.6, avail / SHEET_BASE_WIDTH));
-    sheetEl.style.transform = `scale(${sheetScale})`;
+    stack.style.transform = `scale(${sheetScale})`;
     zoom.style.width = SHEET_BASE_WIDTH * sheetScale + "px";
-    zoom.style.height = sheetEl.offsetHeight * sheetScale + "px";
+    zoom.style.height = stack.offsetHeight * sheetScale + "px";
     resizeCanvas(true);
+    positionFloatBars();
   };
   fitObs = new ResizeObserver(fit);
   fitObs.observe(scroll);
-  fitObs.observe(sheetEl);
+  fitObs.observe(stack);
   fit();
 }
 
-// Auswahl merken, damit die Farbwahl (öffnet ein eigenes Fenster) die markierte Stelle trifft
+// Punkt in Blatt-Koordinaten (unskaliert)
+function sheetPoint(e) {
+  const r = sheetEl.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / sheetScale, y: (e.clientY - r.top) / sheetScale };
+}
+const relTop = (el) => (el.getBoundingClientRect().top - sheetEl.getBoundingClientRect().top) / sheetScale;
+
+// ---------- Seiten ----------
+
+let paginateQueued = false;
+let lastPages = 0;
+function paginate() {
+  if (paginateQueued) return;
+  paginateQueued = true;
+  requestAnimationFrame(() => {
+    paginateQueued = false;
+    if (!editorEl) return;
+    const doc = currentDoc();
+    const pages = layoutPages(sheetEl, editorEl, doc, sheetScale);
+    if (isFree(doc) && pages !== doc.pages) {
+      doc.pages = pages;
+      persist();
+    }
+    if (pages !== lastPages) {
+      lastPages = pages;
+      renderPageBg(sheetEl, pages);
+    }
+    if (isFree(doc)) editorEl.style.height = pages * STRIDE - PAGE_GAP - CONTENT_TOP + "px";
+    updateStats(pages);
+  });
+}
+
+function renderPageBg(sheet, pages) {
+  $(".sheet-bg", sheet).innerHTML = Array.from(
+    { length: pages },
+    (_, n) => `<div class="bg-page" style="top:${n * STRIDE}px"><div class="pg-lines" style="top:${n ? 0 : CONTENT_TOP}px"></div><span class="pg-num">${n + 1}</span></div>`
+  ).join("");
+  sheet.style.height = pages * STRIDE - PAGE_GAP + "px";
+}
+
+// Einheiten für den Seitenumbruch: Absätze, Überschriften, einzelne Listenpunkte, Tabellen, Bilder
+function flowUnits(editor) {
+  const units = [];
+  for (const el of editor.children) {
+    if (/^(UL|OL)$/.test(el.tagName)) units.push(...el.children);
+    else units.push(el);
+  }
+  return units;
+}
+
+// Rechnet aus, wie viele Seiten gebraucht werden. Im Word-Modus rutschen Absätze, die nicht mehr passen, auf die nächste Seite.
+function layoutPages(sheet, editor, doc, scale) {
+  // Blattoberkante jedes Mal neu messen – der Browser kann beim Verschieben mitscrollen
+  const topOf = (el) => (el.getBoundingClientRect().top - sheet.getBoundingClientRect().top) / scale;
+  if (isFree(doc)) {
+    let bottom = 0;
+    for (const b of $$(":scope > .box", editor)) bottom = Math.max(bottom, Number(b.dataset.y) + b.offsetHeight);
+    return Math.max(doc.pages || 1, Math.ceil((bottom + PAGE_BOTTOM) / STRIDE), 1);
+  }
+  const units = flowUnits(editor);
+  units.forEach((u) => (u.style.marginTop = ""));
+  let breakNext = false;
+  let bottom = CONTENT_TOP;
+  for (const u of units) {
+    const top = topOf(u);
+    const h = u.getBoundingClientRect().height / scale;
+    const n = Math.floor((top + 1) / STRIDE);
+    const contentEnd = n * STRIDE + PAGE_H - PAGE_BOTTOM;
+    const nextStart = (n + 1) * STRIDE + PAGE_TOP;
+    let target = null;
+    if (breakNext || (top + h > contentEnd + 1 && h <= PAGE_H - PAGE_TOP - PAGE_BOTTOM)) target = nextStart;
+    else if (n > 0 && top < n * STRIDE + PAGE_TOP - 1) target = n * STRIDE + PAGE_TOP;
+    breakNext = u.matches("hr.page-break");
+    if (target !== null && target > top) u.style.marginTop = target - top + "px";
+    bottom = topOf(u) + h;
+  }
+  return Math.max(1, Math.ceil((bottom + PAGE_BOTTOM) / STRIDE));
+}
+
+function updateStats(pages) {
+  const el = $("#docStats");
+  if (!el || !editorEl) return;
+  const words = (editorEl.innerText.match(/[\p{L}\p{N}]+(?:[-'’][\p{L}\p{N}]+)*/gu) || []).length;
+  el.textContent = `${pages} ${pages === 1 ? "Seite" : "Seiten"} · ${words} ${words === 1 ? "Wort" : "Wörter"}`;
+}
+
+// ---------- Freies Feld (liniert & kariert) ----------
+
+const boxes = () => (editorEl ? $$(":scope > .box", editorEl) : []);
+
+function placeBox(b) {
+  b.style.left = Number(b.dataset.x) + "px";
+  b.style.top = Number(b.dataset.y) - CONTENT_TOP + "px";
+  b.style.width = Number(b.dataset.w) + "px";
+}
+
+function prepareBox(b) {
+  placeBox(b);
+  if (!b.classList.contains("img-box")) {
+    b.contentEditable = "true";
+    b.spellcheck = true;
+    b.lang = "de";
+    b.setAttribute("autocorrect", "on");
+    b.setAttribute("autocapitalize", "sentences");
+  }
+}
+
+// Zeile einrasten und nie in der Lücke zwischen zwei Seiten landen
+function snapY(y) {
+  y = CONTENT_TOP + Math.max(0, Math.round((y - CONTENT_TOP) / LINE)) * LINE;
+  const n = Math.floor(y / STRIDE);
+  if (y > n * STRIDE + PAGE_H - PAGE_BOTTOM) y = (n + 1) * STRIDE + PAGE_TOP;
+  if (n > 0 && y < n * STRIDE + PAGE_TOP) y = n * STRIDE + PAGE_TOP;
+  return y;
+}
+
+function newBox(x, y, html = "<p><br></p>", { cls = "", w } = {}) {
+  const doc = currentDoc();
+  const ins = insets(doc);
+  const b = document.createElement("div");
+  b.className = `box ${cls}`.trim();
+  b.dataset.x = Math.round(Math.max(ins.l - 40, Math.min(x, SHEET_BASE_WIDTH - ins.r - 80)));
+  b.dataset.y = snapY(y);
+  b.dataset.w = Math.round(w ?? SHEET_BASE_WIDTH - ins.r - Number(b.dataset.x));
+  b.innerHTML = html;
+  editorEl.appendChild(b);
+  prepareBox(b);
+  return b;
+}
+
+function caretInto(el, atEnd = true) {
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  r.collapse(!atEnd);
+  const sel = getSelection();
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+
+// Unterkante des untersten Blocks → dort geht's weiter
+function nextFreeY() {
+  let bottom = CONTENT_TOP;
+  for (const b of boxes()) bottom = Math.max(bottom, Number(b.dataset.y) + Math.ceil(b.offsetHeight / LINE) * LINE);
+  return snapY(bottom + (boxes().length ? LINE : 0));
+}
+
+function setupFreeMode() {
+  const doc = currentDoc();
+  editorEl.classList.add("free");
+  editorEl.contentEditable = "false";
+  // Ältere Blätter ohne Blöcke: alles in einen Block packen
+  if (!boxes().length && editorEl.textContent.trim()) {
+    const html = editorEl.innerHTML;
+    editorEl.innerHTML = "";
+    newBox(insets(doc).l, CONTENT_TOP, html);
+  }
+  boxes().forEach(prepareBox);
+
+  // Auf eine freie Stelle tippen → neuer Textblock genau dort
+  editorEl.addEventListener("pointerdown", (e) => {
+    if (e.target !== editorEl || ui.tool !== "text") return;
+    e.preventDefault();
+    const p = sheetPoint(e);
+    const b = newBox(p.x, p.y - LINE / 2);
+    b.focus();
+    caretInto(b.firstChild);
+    showBoxTools(b);
+  });
+  editorEl.addEventListener("focusin", (e) => {
+    const b = e.target.closest?.(".box");
+    if (b) showBoxTools(b);
+  });
+  editorEl.addEventListener("focusout", (e) => {
+    const b = e.target.closest?.(".box");
+    setTimeout(() => {
+      if (b && b.isConnected && document.activeElement !== b && !b.textContent.trim() && !b.querySelector("img, hr, table")) {
+        b.remove();
+        hideBoxTools();
+        onEditorInput();
+      }
+    }, 150);
+  });
+  setupBoxTools();
+}
+
+let activeBox = null;
+
+function showBoxTools(b) {
+  activeBox = b;
+  $("#boxTools").hidden = false;
+  positionFloatBars();
+}
+
+function hideBoxTools() {
+  activeBox = null;
+  const t = $("#boxTools");
+  if (t) t.hidden = true;
+}
+
+function positionFloatBars() {
+  const t = $("#boxTools");
+  if (t && activeBox?.isConnected) {
+    const x = Number(activeBox.dataset.x);
+    const y = Number(activeBox.dataset.y);
+    Object.assign(t.style, { left: x - 30 + "px", top: y + "px", width: Number(activeBox.dataset.w) + 30 + "px", height: Math.max(LINE, activeBox.offsetHeight) + "px" });
+  } else if (t) t.hidden = true;
+}
+
+function setupBoxTools() {
+  const tools = $("#boxTools");
+  const drag = (handle, onMove) => {
+    handle.addEventListener("pointerdown", (e) => {
+      if (!activeBox) return;
+      e.preventDefault();
+      e.stopPropagation();
+      handle.setPointerCapture(e.pointerId);
+      const b = activeBox;
+      const start = { x: e.clientX, y: e.clientY, bx: Number(b.dataset.x), by: Number(b.dataset.y), bw: Number(b.dataset.w) };
+      const move = (ev) => {
+        onMove(b, (ev.clientX - start.x) / sheetScale, (ev.clientY - start.y) / sheetScale, start);
+        placeBox(b);
+        positionFloatBars();
+      };
+      const up = () => {
+        handle.removeEventListener("pointermove", move);
+        handle.removeEventListener("pointerup", up);
+        handle.removeEventListener("pointercancel", up);
+        b.dataset.y = snapY(Number(b.dataset.y));
+        b.dataset.x = Math.round(Number(b.dataset.x) / 2) * 2;
+        placeBox(b);
+        positionFloatBars();
+        onEditorInput();
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", up);
+      handle.addEventListener("pointercancel", up);
+    });
+  };
+  drag($(".bt-move", tools), (b, dx, dy, s) => {
+    b.dataset.x = Math.max(0, Math.min(SHEET_BASE_WIDTH - 60, s.bx + dx));
+    b.dataset.y = Math.max(CONTENT_TOP, s.by + dy);
+  });
+  drag($(".bt-resize", tools), (b, dx, _dy, s) => {
+    b.dataset.w = Math.max(80, Math.min(SHEET_BASE_WIDTH - Number(b.dataset.x), s.bw + dx));
+  });
+  $(".bt-del", tools).addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    if (!activeBox) return;
+    activeBox.remove();
+    hideBoxTools();
+    onEditorInput();
+  });
+}
+
+// ---------- Bilder ----------
+
+let activeImg = null;
+
+function setupImages() {
+  const bar = $("#imgBar");
+  $$("button", bar).forEach((b) =>
+    b.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      if (!activeImg) return;
+      const box = activeImg.closest(".box");
+      if (b.dataset.iw) {
+        if (box) box.dataset.w = Math.round(((SHEET_BASE_WIDTH - insets(currentDoc()).r - Number(box.dataset.x)) * Number(b.dataset.iw)) / 100);
+        else activeImg.style.width = b.dataset.iw + "%";
+        if (box) placeBox(box);
+      }
+      if (b.dataset.ia) {
+        const p = activeImg.closest("p");
+        if (p && !box) p.style.textAlign = b.dataset.ia;
+      }
+      if ("idel" in b.dataset) {
+        (box || activeImg).remove();
+        selectImage(null);
+      }
+      onEditorInput();
+      positionImgBar();
+    })
+  );
+}
+
+function selectImage(img) {
+  $$("img.selected", editorEl).forEach((i) => i.classList.remove("selected"));
+  activeImg = img;
+  const bar = $("#imgBar");
+  if (!bar) return;
+  bar.hidden = !img;
+  if (img) {
+    img.classList.add("selected");
+    positionImgBar();
+  }
+}
+
+function positionImgBar() {
+  if (!activeImg?.isConnected) return;
+  const r = activeImg.getBoundingClientRect();
+  const s = sheetEl.getBoundingClientRect();
+  Object.assign($("#imgBar").style, { left: (r.left - s.left) / sheetScale + "px", top: Math.max(0, (r.top - s.top) / sheetScale - 44) + "px" });
+}
+
+function onEditorClick(e) {
+  const img = e.target.closest?.("img");
+  selectImage(img || null);
+  if (img?.closest(".img-box")) showBoxTools(img.closest(".img-box"));
+  // Checkliste: auf das Kästchen tippen = abhaken
+  const li = e.target.closest?.("ul.checklist > li");
+  if (li && e.clientX - li.getBoundingClientRect().left < 26 * sheetScale) {
+    li.dataset.checked = li.dataset.checked === "true" ? "false" : "true";
+    onEditorInput();
+  }
+}
+
+function insertImage() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = async () => {
+    const file = input.files[0];
+    if (!file) return;
+    const src = await downscaleImage(file, 1600);
+    const doc = currentDoc();
+    if (isFree(doc)) {
+      const b = newBox(insets(doc).l, nextFreeY(), `<img src="${src}" alt="">`, { cls: "img-box", w: 320 });
+      showBoxTools(b);
+      b.scrollIntoView({ behavior: "smooth", block: "center" });
+    } else {
+      restoreSelection();
+      document.execCommand("insertHTML", false, `<p><img src="${src}" alt="" style="width:60%"></p><p><br></p>`);
+    }
+    onEditorInput();
+  };
+  input.click();
+}
+
+// ---------- Darstellung ----------
+
+// Auswahl merken, damit Farbfeld & Menüs die markierte Stelle treffen
 let savedRange = null;
 function rememberSelection() {
   const sel = getSelection();
-  if (editorEl && sel.rangeCount && editorEl.contains(sel.getRangeAt(0).commonAncestorContainer)) savedRange = sel.getRangeAt(0).cloneRange();
+  if (editorEl && sel.rangeCount && editorEl.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+    savedRange = sel.getRangeAt(0).cloneRange();
+    updateFormatSelect();
+  }
+}
+
+function restoreSelection() {
+  if (!savedRange || !editorEl.contains(savedRange.commonAncestorContainer)) return focusEditorStart();
+  const host = savedRange.commonAncestorContainer.nodeType === 1 ? savedRange.commonAncestorContainer : savedRange.commonAncestorContainer.parentElement;
+  (host.closest(".box") || editorEl).focus();
+  const sel = getSelection();
+  sel.removeAllRanges();
+  sel.addRange(savedRange);
 }
 
 function applyTextColor(color) {
-  editorEl.focus();
-  if (savedRange) {
-    const sel = getSelection();
-    sel.removeAllRanges();
-    sel.addRange(savedRange);
-  }
+  restoreSelection();
   document.execCommand("styleWithCSS", false, true);
   document.execCommand("foreColor", false, color);
   onEditorInput();
@@ -1094,26 +1503,39 @@ function applyTextColor(color) {
 
 function applyDocLook() {
   const doc = currentDoc();
-  sheetEl.classList.remove("paper-lined", "paper-blank", "paper-grid");
-  sheetEl.classList.add(`paper-${doc.paper}`);
+  sheetEl.classList.remove("paper-lined", "paper-blank", "paper-grid", "free", "flow");
+  sheetEl.classList.add(`paper-${doc.paper}`, isFree(doc) ? "free" : "flow");
   const d = doc.design || {};
-  sheetEl.style.setProperty("--page-bg", d.pageColor || "#ffffff");
-  sheetEl.style.setProperty("--heading", d.headingColor || "#1c1c1e");
-  sheetEl.style.setProperty("--doc-accent", d.accentColor || moduleColor(doc.moduleId));
-  sheetEl.style.setProperty("--doc-font", FONTS[doc.font] || FONTS[state.settings.font] || FONTS.Arial);
+  const accent = d.accentColor || moduleColor(doc.moduleId);
+  const ins = insets(doc);
+  const props = {
+    "--page-bg": d.pageColor || "#ffffff",
+    "--heading": d.headingColor || accent,
+    "--doc-accent": accent,
+    "--doc-font": FONTS[doc.font] || FONTS[state.settings.font] || FONTS.Arial,
+    "--pad-l": ins.l + "px",
+    "--pad-r": ins.r + "px",
+    "--spacing": doc.spacing || 1.5,
+  };
+  for (const el of [sheetEl, $(".glossary-page")]) for (const [k, v] of Object.entries(props)) el?.style.setProperty(k, v);
+  paginate();
 }
 
 function focusEditorStart() {
-  editorEl.focus();
-  if (!editorEl.firstChild) {
-    editorEl.innerHTML = "<p><br></p>";
+  const doc = currentDoc();
+  if (isFree(doc)) {
+    const first = boxes()
+      .filter((b) => !b.classList.contains("img-box"))
+      .sort((a, b) => a.dataset.y - b.dataset.y)[0];
+    const b = first || newBox(insets(doc).l, CONTENT_TOP);
+    b.focus();
+    caretInto(b.lastElementChild || b);
+    showBoxTools(b);
+    return;
   }
-  const r = document.createRange();
-  r.selectNodeContents(editorEl.firstChild);
-  r.collapse(true);
-  const sel = getSelection();
-  sel.removeAllRanges();
-  sel.addRange(r);
+  editorEl.focus();
+  if (!editorEl.firstChild) editorEl.innerHTML = "<p><br></p>";
+  caretInto(editorEl.firstChild, false);
 }
 
 function renderModeSeg() {
@@ -1140,40 +1562,91 @@ function renderToolSeg() {
 
 function setTool(tool) {
   ui.tool = tool;
+  clearLasso();
+  if (tool === "pen") {
+    hideBoxTools();
+    selectImage(null);
+  }
   renderToolSeg();
   renderSubbar();
-  if (tool === "text") editorEl.focus();
+  if (tool === "text") focusEditorStart();
 }
 
-// Leiste unter der Werkzeugleiste: Schrift- bzw. Stift-Einstellungen
+// ---------- Kleine Ausklapp-Menüs ----------
+
+function popMenu(anchor, items) {
+  $$(".pop").forEach((p) => p.remove());
+  const pop = document.createElement("div");
+  pop.className = "pop";
+  for (const item of items) {
+    if (item === "-") {
+      pop.insertAdjacentHTML("beforeend", "<hr>");
+      continue;
+    }
+    const b = document.createElement("button");
+    b.innerHTML = item.label;
+    b.addEventListener("pointerdown", (e) => e.preventDefault());
+    b.addEventListener("click", () => {
+      pop.remove();
+      item.run();
+    });
+    pop.appendChild(b);
+  }
+  document.body.appendChild(pop);
+  const r = anchor.getBoundingClientRect();
+  pop.style.left = Math.min(r.left, innerWidth - pop.offsetWidth - 8) + "px";
+  pop.style.top = r.bottom + 4 + "px";
+  setTimeout(() => {
+    const close = (e) => {
+      if (!pop.contains(e.target)) {
+        pop.remove();
+        document.removeEventListener("pointerdown", close, true);
+      }
+    };
+    document.addEventListener("pointerdown", close, true);
+  });
+}
+
+// ---------- Schrift-Leiste ----------
+
+const BLOCK_FORMATS = [
+  ["p", "Normaler Text"],
+  ["h1", "Überschrift 1"],
+  ["h2", "Überschrift 2"],
+  ["h3", "Überschrift 3"],
+];
+
 function renderSubbar() {
   const bar = $("#subbar");
   if (ui.tool === "text") {
     const doc = currentDoc();
     const font = FONTS[doc.font] ? doc.font : state.settings.font;
     bar.innerHTML = `
-      <select id="blockSel" title="Absatzstil (feste Größen)">
-        <option value="p">Text</option><option value="h1">Überschrift 1</option><option value="h2">Überschrift 2</option><option value="h3">Überschrift 3</option>
-      </select>
+      <select id="blockSel" title="Format: Text oder Überschrift">${BLOCK_FORMATS.map(([v, l]) => `<option value="${v}">${l}</option>`).join("")}</select>
       <select id="fontSel" title="Schriftart für dieses Blatt">
         ${Object.keys(FONTS).map((f) => `<option ${f === font ? "selected" : ""} style="font-family:${FONTS[f]}">${f}</option>`).join("")}
       </select>
       <select id="sizeSel" title="Schriftgröße für Markierung">
-        ${[10, 11, 12, 14, 16, 18, 22].map((s) => `<option value="${s}" ${s === state.settings.fontSize ? "selected" : ""}>${s} pt</option>`).join("")}
+        ${[10, 11, 12, 14, 16, 18, 22, 28].map((s) => `<option value="${s}" ${s === state.settings.fontSize ? "selected" : ""}>${s} pt</option>`).join("")}
       </select>
       <span class="divider"></span>
       <button class="tb" data-cmd="bold" title="Fett (${MOD}+B)"><b>B</b></button>
       <button class="tb" data-cmd="italic" title="Kursiv (${MOD}+I)"><i>I</i></button>
       <button class="tb" data-cmd="underline" title="Unterstrichen (${MOD}+U)"><u>U</u></button>
+      <button class="tb" data-cmd="strikeThrough" title="Durchgestrichen"><s>S</s></button>
       <span class="divider"></span>
       ${TEXT_COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" data-color="${c}" title="${n}"></button>`).join("")}
-      <label class="swatch rainbow" title="Alle Farben">
-        <input type="color" id="textColorPick" value="#7d3cc8"></label>
+      <label class="swatch rainbow" title="Alle Farben"><input type="color" id="textColorPick" value="#7d3cc8"></label>
+      <button class="tb hl-btn" data-cmd="highlight" title="Textmarker (gelb)">🖍</button>
       <button class="tb term-btn" data-cmd="term" title="Fachbegriff rot markieren (${MOD}+Shift+F)">● Fachbegriff</button>
       <span class="divider"></span>
       <button class="tb" data-cmd="insertUnorderedList" title="Stichpunkte (${MOD}+Shift+L)">• Stichpunkte</button>
-      <button class="tb" data-cmd="insertOrderedList" title="Nummerierte Liste: 1. 2. 3.">1. Nummeriert</button>
+      <button class="tb" data-cmd="insertOrderedList" title="Nummerierte Liste">1. Nummeriert</button>
+      <button class="tb" data-cmd="checklist" title="Checkliste zum Abhaken">☑ Checkliste</button>
       <span class="divider"></span>
+      <button class="tb" data-menu="align" title="Ausrichtung">≡ ▾</button>
+      <button class="tb" data-menu="insert" title="Einfügen: Bild, Tabelle …">＋ Einfügen ▾</button>
+      <button class="tb" data-menu="more" title="Mehr Formatierung">⋯</button>
       <button class="tb undo" data-cmd="undo" title="Rückgängig (${MOD}+Z)">↶</button>
       <button class="tb undo" data-cmd="redo" title="Wiederholen">↷</button>`;
     $$("[data-cmd]", bar).forEach((b) => {
@@ -1184,94 +1657,187 @@ function renderSubbar() {
       b.onmousedown = (e) => e.preventDefault();
       b.onclick = () => applyTextColor(b.dataset.color);
     });
+    $$("[data-menu]", bar).forEach((b) => {
+      b.onmousedown = (e) => e.preventDefault();
+      b.onclick = () => openTextMenu(b.dataset.menu, b);
+    });
     const pick = $("#textColorPick", bar);
     pick.addEventListener("input", () => {
       pick.parentElement.style.setProperty("--picked", pick.value);
       applyTextColor(pick.value);
     });
     $("#blockSel", bar).onchange = (e) => {
-      editorEl.focus();
+      restoreSelection();
       setBlock(e.target.value);
     };
     $("#fontSel", bar).onchange = (e) => {
       doc.font = e.target.value;
       applyDocLook();
       touchDoc();
-      resizeCanvas();
     };
     $("#sizeSel", bar).onchange = (e) => applyFontSize(Number(e.target.value));
+    updateFormatSelect();
   } else {
-    const pen = ui.pen;
-    const colors = pen.kind === "marker" ? MARKER_COLORS : PEN_COLORS;
-    if (pen.kind !== "eraser" && !colors.includes(pen.color)) pen.color = colors[0];
-    bar.innerHTML = `
-      <div class="seg">
-        <button data-pen="pen" class="${pen.kind === "pen" ? "on" : ""}">✎ Stift</button>
-        <button data-pen="marker" class="${pen.kind === "marker" ? "on" : ""}">▮ Marker</button>
-        <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">⌫ Radierer</button>
-      </div>
-      <span class="divider"></span>
-      <span title="Dicke">Dicke</span>
-      <input type="range" id="penWidth" min="1" max="${pen.kind === "pen" ? 12 : 40}" value="${pen.width}">
-      <span class="width-dot" id="widthDot"></span>
-      <span class="divider"></span>
-      ${pen.kind === "eraser" ? "" : colors.map((c) => `<button class="swatch ${c === pen.color ? "on" : ""}" style="background:${c}" data-pcolor="${c}"></button>`).join("")}
-      <label class="swatch" title="Eigene Farbe" style="background:conic-gradient(red,yellow,lime,cyan,blue,magenta,red);position:relative;overflow:hidden;${pen.kind === "eraser" ? "display:none" : ""}">
-        <input type="color" id="customPen" style="opacity:0;position:absolute;inset:0;width:100%;height:100%;cursor:pointer"></label>
-      <span class="divider"></span>
-      <button class="tb" data-p="undo" title="Letzten Strich entfernen">↶ Strich</button>
-      <button class="tb" data-p="clear" title="Alle Zeichnungen löschen">🗑 Alles löschen</button>`;
-    const dot = $("#widthDot", bar);
-    const updDot = () => {
-      const w = Math.max(3, Math.min(30, pen.width));
-      Object.assign(dot.style, { width: w + "px", height: w + "px", color: pen.kind === "eraser" ? "#aeaeb2" : pen.color });
-    };
-    updDot();
-    $$("[data-pen]", bar).forEach(
-      (b) =>
-        (b.onclick = () => {
-          pen.kind = b.dataset.pen;
-          pen.width = pen.kind === "pen" ? 3 : pen.kind === "marker" ? 16 : 20;
-          renderSubbar();
-        })
-    );
-    $("#penWidth", bar).oninput = (e) => {
-      pen.width = Number(e.target.value);
-      updDot();
-    };
-    $$("[data-pcolor]", bar).forEach(
-      (b) =>
-        (b.onclick = () => {
-          pen.color = b.dataset.pcolor;
-          renderSubbar();
-        })
-    );
-    $("#customPen", bar).oninput = (e) => {
-      const hex = e.target.value;
-      if (pen.kind === "marker") {
-        const n = parseInt(hex.slice(1), 16);
-        pen.color = `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},0.4)`;
-      } else pen.color = hex;
-      updDot();
-    };
-    $("[data-p=undo]", bar).onclick = () => {
-      currentDoc().strokes.pop();
-      redrawCanvas();
-      touchDoc();
-    };
-    $("[data-p=clear]", bar).onclick = async () => {
-      if (await confirmModal("Zeichnungen löschen?", "Alle Stiftstriche auf diesem Blatt werden entfernt.", "Löschen", { danger: true })) {
-        currentDoc().strokes = [];
-        redrawCanvas();
-        touchDoc();
-      }
-    };
+    renderPenBar(bar);
   }
 }
 
+function updateFormatSelect() {
+  const sel = $("#blockSel");
+  const block = currentBlock();
+  if (sel && block) sel.value = /^H[1-3]$/.test(block.tagName) ? block.tagName.toLowerCase() : "p";
+}
+
+function inTable() {
+  const n = savedRange?.startContainer;
+  const el = n && (n.nodeType === 1 ? n : n.parentElement);
+  return el?.closest?.("td, th") || null;
+}
+
+function openTextMenu(which, anchor) {
+  const doc = currentDoc();
+  const exec = (cmd, val = null) => () => {
+    restoreSelection();
+    document.execCommand("styleWithCSS", false, cmd === "hiliteColor");
+    document.execCommand(cmd, false, val);
+    onEditorInput();
+  };
+  if (which === "align") {
+    popMenu(anchor, [
+      { label: "⇤ Linksbündig", run: exec("justifyLeft") },
+      { label: "⇹ Zentriert", run: exec("justifyCenter") },
+      { label: "⇥ Rechtsbündig", run: exec("justifyRight") },
+      { label: "☰ Blocksatz", run: exec("justifyFull") },
+      "-",
+      { label: "→ Einzug vergrößern", run: () => indentBlock(1) },
+      { label: "← Einzug verkleinern", run: () => indentBlock(-1) },
+    ]);
+  }
+  if (which === "insert") {
+    const cell = inTable();
+    popMenu(anchor, [
+      { label: "🖼 Bild (Foto / Datei)", run: insertImage },
+      { label: "▦ Tabelle", run: insertTable },
+      { label: "☑ Checkliste", run: () => runCommand("checklist") },
+      { label: "― Trennlinie", run: () => insertBlocks("<hr><p><br></p>") },
+      ...(isFree(doc) ? [] : [{ label: "⤓ Seitenumbruch", run: () => insertBlocks('<hr class="page-break"><p><br></p>') }]),
+      ...(cell
+        ? [
+            "-",
+            { label: "Tabelle: ＋ Zeile", run: () => tableEdit("row+") },
+            { label: "Tabelle: ＋ Spalte", run: () => tableEdit("col+") },
+            { label: "Tabelle: − Zeile", run: () => tableEdit("row-") },
+            { label: "Tabelle: − Spalte", run: () => tableEdit("col-") },
+            { label: "Tabelle löschen", run: () => tableEdit("del") },
+          ]
+        : []),
+    ]);
+  }
+  if (which === "more") {
+    popMenu(anchor, [
+      { label: "x² Hochgestellt", run: exec("superscript") },
+      { label: "x₂ Tiefgestellt", run: exec("subscript") },
+      { label: "🖍 Textmarker entfernen", run: exec("hiliteColor", "transparent") },
+      { label: "⌫ Formatierung entfernen", run: exec("removeFormat") },
+      "-",
+      { label: "Wörter zählen", run: () => toast($("#docStats").textContent, "", 3500) },
+    ]);
+  }
+}
+
+// Fügt Blöcke an der Cursorstelle ein (Word-Modus) bzw. als neuen Block darunter (freies Feld)
+function insertBlocks(html) {
+  const doc = currentDoc();
+  if (isFree(doc)) {
+    const host = savedRange && (savedRange.startContainer.nodeType === 1 ? savedRange.startContainer : savedRange.startContainer.parentElement)?.closest(".box");
+    if (host && !host.classList.contains("img-box")) {
+      restoreSelection();
+      document.execCommand("insertHTML", false, html);
+    } else {
+      const b = newBox(insets(doc).l, nextFreeY(), html);
+      b.focus();
+      caretInto(b.firstElementChild || b, false);
+      showBoxTools(b);
+    }
+  } else {
+    restoreSelection();
+    document.execCommand("insertHTML", false, html);
+  }
+  onEditorInput();
+}
+
+// Fügt Blöcke immer ans Ende an und gibt die neuen Elemente zurück (für Vorlagen)
+function appendBlocks(html) {
+  const doc = currentDoc();
+  let host = editorEl;
+  if (isFree(doc)) {
+    host = newBox(insets(doc).l, nextFreeY(), "");
+    showBoxTools(host);
+  }
+  const before = host.children.length;
+  host.insertAdjacentHTML("beforeend", html);
+  onEditorInput();
+  normalizeBlocks();
+  return [...host.children].slice(before);
+}
+
+function insertTable() {
+  insertBlocks(`<table class="tbl"><tbody>${"<tr><td><br></td><td><br></td><td><br></td></tr>".repeat(3)}</tbody></table><p><br></p>`);
+  // Cursor in die erste Zelle setzen
+  const sel = getSelection();
+  const at = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement);
+  const tables = $$("table.tbl", editorEl);
+  const table = at?.closest("p")?.previousElementSibling?.matches("table") ? at.closest("p").previousElementSibling : tables[tables.length - 1];
+  const cell = table?.querySelector("td");
+  if (cell) caretInto(cell, false);
+}
+
+function tableEdit(action) {
+  const cell = inTable();
+  if (!cell) return;
+  const row = cell.parentElement;
+  const table = cell.closest("table");
+  const col = [...row.children].indexOf(cell);
+  if (action === "row+") row.insertAdjacentHTML("afterend", `<tr>${"<td><br></td>".repeat(row.children.length)}</tr>`);
+  if (action === "col+") $$("tr", table).forEach((tr) => tr.children[col].insertAdjacentHTML("afterend", "<td><br></td>"));
+  if (action === "row-") row.parentElement.children.length > 1 ? row.remove() : table.remove();
+  if (action === "col-") row.children.length > 1 ? $$("tr", table).forEach((tr) => tr.children[col]?.remove()) : table.remove();
+  if (action === "del") table.remove();
+  onEditorInput();
+}
+
+function indentBlock(dir) {
+  restoreSelection();
+  const block = currentBlock();
+  if (!block) return;
+  if (/^(UL|OL)$/.test(block.tagName)) {
+    document.execCommand(dir > 0 ? "indent" : "outdent");
+  } else {
+    const next = Math.max(0, Math.min(5 * 47, (parseInt(block.style.paddingLeft) || 0) + dir * 47));
+    block.style.paddingLeft = next ? next + "px" : "";
+  }
+  onEditorInput();
+}
+
 function runCommand(cmd) {
-  editorEl.focus();
+  restoreSelection();
   if (cmd === "term") return toggleTerm();
+  if (cmd === "highlight") {
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand("hiliteColor", false, "#fff176");
+    return onEditorInput();
+  }
+  if (cmd === "checklist") {
+    const li = getSelection().anchorNode?.parentElement?.closest("li") || (getSelection().anchorNode?.closest?.("li") ?? null);
+    if (!li) document.execCommand("insertUnorderedList");
+    const ul = (getSelection().anchorNode?.nodeType === 1 ? getSelection().anchorNode : getSelection().anchorNode?.parentElement)?.closest("ul");
+    if (ul) {
+      ul.classList.toggle("checklist");
+      $$(":scope > li", ul).forEach((x) => (x.dataset.checked ||= "false"));
+    }
+    unnestBlocks();
+    return onEditorInput();
+  }
   document.execCommand("styleWithCSS", false, false);
   document.execCommand(cmd, false, null);
   onEditorInput();
@@ -1282,18 +1848,20 @@ function setBlock(tag) {
   const isSame = current && current.tagName.toLowerCase() === tag;
   document.execCommand("formatBlock", false, isSame ? "p" : tag);
   onEditorInput();
+  updateFormatSelect();
 }
 
+// Der Absatz (bzw. die Liste), in dem der Cursor steht – im freien Feld innerhalb des Textblocks
 function currentBlock() {
   const sel = getSelection();
   if (!sel.rangeCount) return null;
   let n = sel.anchorNode;
-  while (n && n.parentNode !== editorEl) n = n.parentNode;
-  return n && n.nodeType === 1 ? n : null;
+  while (n && n.parentNode && n.parentNode !== editorEl && !n.parentNode.classList?.contains("box")) n = n.parentNode;
+  return n && n.nodeType === 1 && !n.classList.contains("box") && n !== editorEl ? n : null;
 }
 
 function applyFontSize(pt) {
-  editorEl.focus();
+  restoreSelection();
   ui.pendingFontSize = pt;
   document.execCommand("styleWithCSS", false, false);
   document.execCommand("fontSize", false, "7");
@@ -1349,7 +1917,7 @@ function onEditorKeydown(e) {
   if (e.key === " " && !e.shiftKey) {
     const block = currentBlock();
     const sel = getSelection();
-    if (block && sel.isCollapsed && !block.closest("ul,ol")) {
+    if (block && sel.isCollapsed && !block.closest("ul,ol") && /^(P|DIV|H[1-3])$/.test(block.tagName)) {
       const text = block.textContent;
       const kind = MD_SHORTCUTS[text.trim()];
       const r = sel.getRangeAt(0);
@@ -1384,19 +1952,26 @@ function onEditorKeydown(e) {
     e.preventDefault();
     const inList = currentBlock()?.closest?.("ul,ol") || getSelection().anchorNode?.parentElement?.closest("li");
     if (inList) document.execCommand(e.shiftKey ? "outdent" : "indent");
-    else document.execCommand("insertText", false, "    ");
+    else document.execCommand("insertText", false, "    ");
   }
 }
 
 function onEditorPaste(e) {
-  // Immer als reiner Text einfügen, damit Schriftart & Größe einheitlich bleiben
+  // Bilder aus der Zwischenablage einfügen, Text immer ohne fremde Formatierung
+  const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith("image/"));
   e.preventDefault();
+  if (file) {
+    downscaleImage(file, 1600).then((src) => {
+      if (isFree(currentDoc())) {
+        const b = newBox(insets(currentDoc()).l, nextFreeY(), `<img src="${src}" alt="">`, { cls: "img-box", w: 320 });
+        showBoxTools(b);
+      } else document.execCommand("insertHTML", false, `<img src="${src}" alt="" style="width:60%">`);
+      onEditorInput();
+    });
+    return;
+  }
   const text = e.clipboardData.getData("text/plain");
-  const html = text
-    .split(/\r?\n/)
-    .map((l) => esc(l))
-    .join("<br>");
-  document.execCommand("insertHTML", false, html);
+  document.execCommand("insertHTML", false, text.split(/\r?\n/).map((l) => esc(l)).join("<br>"));
 }
 
 const onEditorInput = (() => {
@@ -1407,9 +1982,12 @@ const onEditorInput = (() => {
   return () => {
     normalizeFonts();
     const doc = currentDoc();
-    if (!doc) return;
+    if (!doc || !editorEl) return;
     doc.html = editorEl.innerHTML;
     touchDoc();
+    paginate();
+    positionFloatBars();
+    if (activeImg) positionImgBar();
     later();
   };
 })();
@@ -1432,53 +2010,63 @@ function updateSavedState(text) {
 
 // ---------- Blöcke & Verbesserung ----------
 
+// Wo die Absätze liegen: im Word-Modus direkt im Blatt, im freien Feld in den Textblöcken
+const containers = () => (editorEl ? (isFree(currentDoc()) ? boxes().filter((b) => !b.classList.contains("img-box")) : [editorEl]) : []);
+const allBlocks = () => containers().flatMap((c) => [...c.children]);
+const findBlock = (bid) => allBlocks().find((el) => el.dataset.bid === bid) || null;
+
 // Jeder Absatz bekommt eine feste ID, damit nur Bearbeitetes verbessert wird
 function normalizeBlocks() {
   if (!editorEl) return;
-  unnestBlocks();
-  let pendingInline = [];
-  const flush = (before) => {
-    if (!pendingInline.length) return;
-    const p = document.createElement("p");
-    editorEl.insertBefore(p, before);
-    p.append(...pendingInline);
-    pendingInline = [];
-  };
-  for (const node of [...editorEl.childNodes]) {
-    const isBlock = node.nodeType === 1 && /^(P|DIV|H1|H2|H3|UL|OL)$/.test(node.tagName);
-    if (isBlock) flush(node);
-    else if (node.nodeType === 3 && !node.textContent.trim() && !pendingInline.length) node.remove();
-    else pendingInline.push(node);
-  }
-  flush(null);
-  for (const el of editorEl.children) {
-    if (el.tagName === "DIV") {
+  for (const c of containers()) {
+    unnestBlocks(c);
+    let pendingInline = [];
+    const flush = (before) => {
+      if (!pendingInline.length) return;
       const p = document.createElement("p");
-      p.append(...el.childNodes);
-      el.replaceWith(p);
+      c.insertBefore(p, before);
+      p.append(...pendingInline);
+      pendingInline = [];
+    };
+    for (const node of [...c.childNodes]) {
+      const isBlock = node.nodeType === 1 && /^(P|DIV|H1|H2|H3|UL|OL|TABLE|HR)$/.test(node.tagName);
+      if (isBlock) flush(node);
+      else if (node.nodeType === 3 && !node.textContent.trim() && !pendingInline.length) node.remove();
+      else pendingInline.push(node);
     }
+    flush(null);
+    for (const el of [...c.children]) {
+      if (el.tagName === "DIV") {
+        const p = document.createElement("p");
+        p.append(...el.childNodes);
+        el.replaceWith(p);
+      }
+    }
+    for (const el of c.children) if (!el.dataset.bid) el.dataset.bid = uid().slice(0, 8);
   }
-  for (const el of editorEl.children) if (!el.dataset.bid) el.dataset.bid = uid().slice(0, 8);
   currentDoc().html = editorEl.innerHTML;
 }
 
-// Vergleich über Text + Fachbegriffe, damit reine Formatierungen nicht als „bearbeitet“ zählen
 // Browser verschachteln Listen/Überschriften manchmal in <p> – wieder auf eine Ebene holen
-function unnestBlocks() {
-  for (const p of [...editorEl.children]) {
-    if (/^(P|DIV)$/.test(p.tagName) && p.querySelector(":scope > ul, :scope > ol, :scope > h1, :scope > h2, :scope > h3, :scope > p")) {
-      p.replaceWith(...[...p.childNodes].filter((n) => n.nodeType === 1 || n.textContent.trim()));
+function unnestBlocks(container) {
+  for (const c of container ? [container] : containers()) {
+    for (const p of [...c.children]) {
+      if (/^(P|DIV)$/.test(p.tagName) && p.querySelector(":scope > ul, :scope > ol, :scope > h1, :scope > h2, :scope > h3, :scope > p, :scope > table")) {
+        p.replaceWith(...[...p.childNodes].filter((n) => n.nodeType === 1 || n.textContent.trim()));
+      }
     }
   }
 }
 
+// Vergleich über Text + Fachbegriffe, damit reine Formatierungen nicht als „bearbeitet“ zählen
 const blockHash = (el) => hash(el.tagName + el.textContent + "|" + [...el.querySelectorAll("span.term")].map((t) => t.textContent).join(","));
 
 function blockElements(doc) {
-  if (editorEl && ui.docId === doc.id) return [...editorEl.children];
+  if (editorEl && ui.docId === doc.id) return allBlocks();
   const box = document.createElement("div");
   box.innerHTML = doc.html;
-  return [...box.children];
+  const hosts = box.querySelector(":scope > .box") ? $$(":scope > .box:not(.img-box)", box) : [box];
+  return hosts.flatMap((h) => [...h.children]);
 }
 
 function pendingBlocks(doc) {
@@ -1533,7 +2121,7 @@ async function tidyDialog() {
   const doc = currentDoc();
   if (doc.kind === "block") return toast("Collegeblöcke werden nicht verarbeitet.");
   normalizeBlocks();
-  const headings = $$(":scope > h1, :scope > h2", editorEl).length;
+  const headings = allBlocks().filter((el) => /^H[12]$/.test(el.tagName)).length;
   const p = openModal(`
     <h3>✨ Blatt aufräumen</h3>
     <p class="lead">Macht das ganze Blatt ordentlicher – komplett kostenlos.</p>
@@ -1547,7 +2135,7 @@ async function tidyDialog() {
   $("[data-x]", m).onclick = () => m.close(null);
   $("[data-ok]", m).onclick = () => m.close({ spelling: $("#tdSpell", m).checked, tidy: $("#tdTidy", m).checked, toc: $("#tdToc", m).checked });
   const opts = await p;
-  if (opts) await improveBlocks([...editorEl.children], opts);
+  if (opts) await improveBlocks(allBlocks(), opts);
 }
 
 async function improveBlocks(blocks, { spelling = true, tidy = true, toc = false } = {}) {
@@ -1576,7 +2164,7 @@ async function improveBlocks(blocks, { spelling = true, tidy = true, toc = false
   normalizeBlocks();
   if (!spellFailed) {
     // Danach gilt das ganze Blatt als verbessert – gefragt wird erst nach der nächsten Änderung
-    for (const el of editorEl.children) doc.improved[el.dataset.bid] = blockHash(el);
+    for (const el of allBlocks()) doc.improved[el.dataset.bid] = blockHash(el);
     doc.declinedSig = "";
   }
   doc.html = editorEl.innerHTML;
@@ -1722,7 +2310,7 @@ const tidyString = (s) =>
 // Regelbasiertes Aufräumen – gibt zurück, wie viele Blöcke sich geändert haben
 function tidyBlocks(blocks) {
   const bids = new Set(blocks.map((b) => b.dataset.bid));
-  const before = new Map([...editorEl.children].map((el) => [el.dataset.bid, el.innerHTML]));
+  const before = new Map(allBlocks().map((el) => [el.dataset.bid, el.innerHTML]));
 
   for (const unit of textUnits(blocks)) {
     for (const n of unit.nodes) {
@@ -1738,7 +2326,7 @@ function tidyBlocks(blocks) {
     }
   }
 
-  const els = () => [...editorEl.children].filter((el) => bids.has(el.dataset.bid));
+  const els = () => allBlocks().filter((el) => bids.has(el.dataset.bid));
   // Zeilen mit „- “ / „• “ / „1. “ werden zu echten Listen
   const listType = (el) => {
     if (el.tagName !== "P") return null;
@@ -1780,19 +2368,19 @@ function tidyBlocks(blocks) {
     }
   }
   // Mehrere leere Zeilen hintereinander → eine
-  for (const el of [...editorEl.children]) {
+  for (const el of allBlocks()) {
     const empty = (x) => x && x.tagName === "P" && !x.textContent.trim() && !x.querySelector("span");
     if (empty(el) && (empty(el.previousElementSibling) || !el.nextElementSibling)) el.remove();
   }
 
   let changed = 0;
-  for (const el of editorEl.children) if (before.get(el.dataset.bid) !== el.innerHTML) changed++;
+  for (const el of allBlocks()) if (before.get(el.dataset.bid) !== el.innerHTML) changed++;
   return changed;
 }
 
 function insertToc() {
   $$("[data-toc]", editorEl).forEach((el) => el.remove());
-  const heads = $$(":scope > h1, :scope > h2", editorEl).filter((h) => h.textContent.trim());
+  const heads = allBlocks().filter((h) => /^H[12]$/.test(h.tagName) && h.textContent.trim());
   if (heads.length < 2) return;
   const title = document.createElement("h3");
   title.textContent = "Inhalt";
@@ -1805,7 +2393,8 @@ function insertToc() {
     if (h.tagName === "H2") li.style.marginLeft = "18px";
     ul.appendChild(li);
   }
-  editorEl.prepend(title, ul);
+  const host = isFree(currentDoc()) ? containers().sort((a, b) => a.dataset.y - b.dataset.y)[0] : editorEl;
+  host?.prepend(title, ul);
 }
 
 // ---------- Fachbegriffe ----------
@@ -1895,7 +2484,7 @@ async function toolbarAction(a) {
 async function leaveEditor() {
   if (ui.view !== "editor" || !currentDoc()) return;
   const doc = currentDoc();
-  if (!editorEl.textContent.trim() && !doc.strokes.length && doc.title === `${KINDS[doc.kind].label} ${fmtShort(doc.createdAt)}`) {
+  if (!editorEl.textContent.trim() && !editorEl.querySelector("img") && !doc.strokes.length && doc.title === `${KINDS[doc.kind].label} ${fmtShort(doc.createdAt)}`) {
     state.docs = state.docs.filter((d) => d.id !== doc.id); // leeres Blatt nicht aufheben
     await writeState();
   } else {
@@ -1904,12 +2493,162 @@ async function leaveEditor() {
   resizeObs?.disconnect();
   fitObs?.disconnect();
   document.removeEventListener("selectionchange", rememberSelection);
+  $$(".pop").forEach((p) => p.remove());
   editorEl = sheetEl = canvasEl = null;
+  activeBox = activeImg = null;
+  lastPages = 0;
   ui.view = "files";
   if (moduleById(doc.moduleId) || doc.moduleId === null) ui.loc = { moduleId: doc.moduleId, folderId: doc.folderId };
 }
 
-// ---------- Stift / Zeichnen ----------
+// ---------- Stift, Formen & Lasso ----------
+
+const SHAPES = [
+  ["line", "／ Linie"],
+  ["arrow", "→ Pfeil"],
+  ["rect", "▭ Rechteck"],
+  ["ellipse", "◯ Kreis"],
+  ["triangle", "△ Dreieck"],
+];
+
+function renderPenBar(bar) {
+  const pen = ui.pen;
+  pen.shape ||= "line";
+  const colors = pen.kind === "marker" ? MARKER_COLORS : PEN_COLORS;
+  const usesColor = !["eraser", "lasso"].includes(pen.kind);
+  if (usesColor && !colors.includes(pen.color) && !pen.customColor) pen.color = colors[0];
+  bar.innerHTML = `
+    <div class="seg">
+      <button data-pen="pen" class="${pen.kind === "pen" ? "on" : ""}">✎ Stift</button>
+      <button data-pen="marker" class="${pen.kind === "marker" ? "on" : ""}">▮ Marker</button>
+      <button data-pen="shape" class="${pen.kind === "shape" ? "on" : ""}">△ Formen</button>
+      <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">⌫ Radierer</button>
+      <button data-pen="lasso" class="${pen.kind === "lasso" ? "on" : ""}" title="Einkreisen, dann löschen oder verschieben">◌ Lasso</button>
+    </div>
+    ${pen.kind === "shape" ? `<span class="divider"></span>${SHAPES.map(([k, l]) => `<button class="chip ${pen.shape === k ? "on" : ""}" data-shape="${k}">${l}</button>`).join("")}` : ""}
+    ${
+      pen.kind === "lasso"
+        ? `<span class="hint">Striche einkreisen → 🗑 Löschen tippen oder die Auswahl verschieben.</span>`
+        : `<span class="divider"></span>
+      <span title="Dicke">Dicke</span>
+      <input type="range" id="penWidth" min="1" max="${pen.kind === "marker" || pen.kind === "eraser" ? 40 : 12}" value="${pen.width}">
+      <span class="width-dot" id="widthDot"></span>
+      ${
+        usesColor
+          ? `<span class="divider"></span>${colors.map((c) => `<button class="swatch ${c === pen.color ? "on" : ""}" style="background:${c}" data-pcolor="${c}"></button>`).join("")}
+      <label class="swatch rainbow" title="Alle Farben"><input type="color" id="customPen"></label>`
+          : ""
+      }`
+    }
+    <span class="divider"></span>
+    <button class="tb" data-p="undo" title="Letzten Strich entfernen">↶ Strich</button>
+    <button class="tb" data-p="clear" title="Alle Zeichnungen löschen">🗑 Alles</button>`;
+  const dot = $("#widthDot", bar);
+  const updDot = () => {
+    if (!dot) return;
+    const w = Math.max(3, Math.min(30, pen.width));
+    Object.assign(dot.style, { width: w + "px", height: w + "px", color: pen.kind === "eraser" ? "#aeaeb2" : pen.color });
+  };
+  updDot();
+  $$("[data-pen]", bar).forEach(
+    (b) =>
+      (b.onclick = () => {
+        pen.kind = b.dataset.pen;
+        pen.customColor = false;
+        pen.width = { pen: 3, marker: 16, eraser: 20, shape: 3 }[pen.kind] || 3;
+        clearLasso();
+        renderSubbar();
+      })
+  );
+  $$("[data-shape]", bar).forEach(
+    (b) =>
+      (b.onclick = () => {
+        pen.shape = b.dataset.shape;
+        renderSubbar();
+      })
+  );
+  $("#penWidth", bar)?.addEventListener("input", (e) => {
+    pen.width = Number(e.target.value);
+    updDot();
+  });
+  $$("[data-pcolor]", bar).forEach(
+    (b) =>
+      (b.onclick = () => {
+        pen.color = b.dataset.pcolor;
+        pen.customColor = false;
+        renderSubbar();
+      })
+  );
+  $("#customPen", bar)?.addEventListener("input", (e) => {
+    const hex = e.target.value;
+    if (pen.kind === "marker") {
+      const n = parseInt(hex.slice(1), 16);
+      pen.color = `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},0.4)`;
+    } else pen.color = hex;
+    pen.customColor = true;
+    e.target.parentElement.style.setProperty("--picked", hex);
+    $$(".swatch.on", bar).forEach((s) => s.classList.remove("on"));
+    updDot();
+  });
+  $("[data-p=undo]", bar).onclick = () => {
+    currentDoc().strokes.pop();
+    clearLasso();
+    redrawCanvas();
+    touchDoc();
+  };
+  $("[data-p=clear]", bar).onclick = async () => {
+    if (await confirmModal("Zeichnungen löschen?", "Alle Stiftstriche und Formen auf diesem Blatt werden entfernt.", "Löschen", { danger: true })) {
+      currentDoc().strokes = [];
+      clearLasso();
+      redrawCanvas();
+      touchDoc();
+    }
+  };
+}
+
+let lasso = null; // { idx: [...], bbox: [x1,y1,x2,y2] } in normierten Koordinaten
+
+function clearLasso() {
+  lasso = null;
+  const bar = $("#lassoBar");
+  if (bar) bar.hidden = true;
+  if (canvasEl) redrawCanvas();
+}
+
+// Punkte, die eine Form ausmachen (für Lasso-Auswahl)
+function strokePoints(s) {
+  if (s.kind !== "shape") return s.points;
+  const [[x1, y1], [x2, y2]] = s.points;
+  const pts = [];
+  for (let t = 0; t <= 1; t += 0.125) pts.push([x1 + (x2 - x1) * t, y1], [x1 + (x2 - x1) * t, y2], [x1, y1 + (y2 - y1) * t], [x2, y1 + (y2 - y1) * t]);
+  return s.shape === "line" || s.shape === "arrow" ? [0, 0.25, 0.5, 0.75, 1].map((t) => [x1 + (x2 - x1) * t, y1 + (y2 - y1) * t]) : pts;
+}
+
+function insidePoly([x, y], poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i];
+    const [xj, yj] = poly[j];
+    if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+function bboxOf(strokes) {
+  const pts = strokes.flatMap(strokePoints);
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+}
+
+function showLassoBar() {
+  const bar = $("#lassoBar");
+  if (!lasso || !bar) return;
+  const W = SHEET_BASE_WIDTH;
+  bar.hidden = false;
+  bar.style.left = Math.max(0, lasso.bbox[0] * W) + "px";
+  bar.style.top = Math.max(0, lasso.bbox[1] * W - 46) + "px";
+}
 
 function setupCanvas() {
   resizeObs?.disconnect();
@@ -1918,31 +2657,114 @@ function setupCanvas() {
   resizeCanvas();
 
   let current = null;
+  let lassoPath = null;
+  let moving = null;
   let sawPen = false;
   const pointFrom = (e) => {
     const rect = sheetEl.getBoundingClientRect();
     const W = rect.width;
     return [(e.clientX - rect.left) / W, (e.clientY - rect.top) / W];
   };
+  const ctx = () => canvasEl.getContext("2d");
+
+  $("#lassoBar [data-l=delete]").addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!lasso) return;
+    const doc = currentDoc();
+    doc.strokes = doc.strokes.filter((_, i) => !lasso.idx.includes(i));
+    clearLasso();
+    touchDoc();
+  });
+
   canvasEl.addEventListener("pointerdown", (e) => {
     if (ui.tool !== "pen") return;
     if (e.pointerType === "pen") sawPen = true;
     if (e.pointerType === "touch" && sawPen) return; // Handballen ignorieren
     e.preventDefault();
     canvasEl.setPointerCapture(e.pointerId);
-    const { kind, color, width } = ui.pen;
-    current = { kind, color: kind === "eraser" ? "#000" : color, width, points: [pointFrom(e)] };
-    drawStroke(canvasEl.getContext("2d"), current, sheetEl.clientWidth);
+    const pt = pointFrom(e);
+    const { kind, color, width, shape } = ui.pen;
+    if (kind === "lasso") {
+      const [x1, y1, x2, y2] = lasso?.bbox || [];
+      if (lasso && pt[0] >= x1 - 0.01 && pt[0] <= x2 + 0.01 && pt[1] >= y1 - 0.01 && pt[1] <= y2 + 0.01) {
+        moving = { start: pt, orig: lasso.idx.map((i) => currentDoc().strokes[i].points.map((p) => [...p])), bbox: [...lasso.bbox] };
+        $("#lassoBar").hidden = true;
+      } else {
+        clearLasso();
+        lassoPath = [pt];
+      }
+      return;
+    }
+    if (kind === "shape") {
+      current = { kind: "shape", shape, color, width, points: [pt, pt] };
+      return;
+    }
+    current = { kind, color: kind === "eraser" ? "#000" : color, width, points: [pt] };
+    drawStroke(ctx(), current, sheetEl.clientWidth);
   });
+
   canvasEl.addEventListener("pointermove", (e) => {
+    const pt = pointFrom(e);
+    const W = sheetEl.clientWidth;
+    if (lassoPath) {
+      lassoPath.push(pt);
+      redrawCanvas();
+      const c = ctx();
+      c.save();
+      c.setLineDash([6, 5]);
+      c.strokeStyle = "#007aff";
+      c.lineWidth = 1.5;
+      c.beginPath();
+      lassoPath.forEach(([x, y], i) => (i ? c.lineTo(x * W, y * W) : c.moveTo(x * W, y * W)));
+      c.stroke();
+      c.restore();
+      return;
+    }
+    if (moving) {
+      const dx = pt[0] - moving.start[0];
+      const dy = pt[1] - moving.start[1];
+      const strokes = currentDoc().strokes;
+      lasso.idx.forEach((i, k) => (strokes[i].points = moving.orig[k].map(([x, y]) => [x + dx, y + dy])));
+      lasso.bbox = [moving.bbox[0] + dx, moving.bbox[1] + dy, moving.bbox[2] + dx, moving.bbox[3] + dy];
+      redrawCanvas();
+      return;
+    }
     if (!current) return;
-    const pts = current.points;
-    pts.push(pointFrom(e));
-    drawSegment(canvasEl.getContext("2d"), current, sheetEl.clientWidth, pts.length - 2);
+    if (current.kind === "shape") {
+      current.points[1] = pt;
+      redrawCanvas();
+      drawStroke(ctx(), current, W);
+      return;
+    }
+    current.points.push(pt);
+    drawSegment(ctx(), current, W, current.points.length - 2);
   });
+
   const end = () => {
+    if (lassoPath) {
+      const strokes = currentDoc().strokes;
+      const idx = lassoPath.length > 3 ? strokes.map((s, i) => [s, i]).filter(([s]) => {
+        const pts = strokePoints(s);
+        return pts.filter((p) => insidePoly(p, lassoPath)).length >= pts.length / 2;
+      }).map(([, i]) => i) : [];
+      lassoPath = null;
+      if (idx.length) {
+        lasso = { idx, bbox: bboxOf(idx.map((i) => strokes[i])) };
+        showLassoBar();
+      }
+      redrawCanvas();
+      return;
+    }
+    if (moving) {
+      moving = null;
+      showLassoBar();
+      touchDoc();
+      return;
+    }
     if (!current) return;
-    currentDoc().strokes.push(current);
+    const [a, b] = [current.points[0], current.points[current.points.length - 1]];
+    if (current.kind !== "shape" || Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.005) currentDoc().strokes.push(current);
     current = null;
     redrawCanvas();
     touchDoc();
@@ -1967,11 +2789,30 @@ function resizeCanvas(force = false) {
 
 function redrawCanvas() {
   if (!canvasEl) return;
-  const ctx = canvasEl.getContext("2d");
+  const c = canvasEl.getContext("2d");
   const ratio = (window.devicePixelRatio || 1) * sheetScale;
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-  for (const s of currentDoc().strokes) drawStroke(ctx, s, sheetEl.clientWidth);
+  const W = sheetEl.clientWidth;
+  c.setTransform(ratio, 0, 0, ratio, 0, 0);
+  c.clearRect(0, 0, canvasEl.width, canvasEl.height);
+  const strokes = currentDoc().strokes;
+  strokes.forEach((s, i) => {
+    if (lasso?.idx.includes(i)) {
+      c.save();
+      c.shadowColor = "rgba(0,122,255,0.9)";
+      c.shadowBlur = 6;
+      drawStroke(c, s, W);
+      c.restore();
+    } else drawStroke(c, s, W);
+  });
+  if (lasso) {
+    const [x1, y1, x2, y2] = lasso.bbox.map((v) => v * W);
+    c.save();
+    c.setLineDash([6, 5]);
+    c.strokeStyle = "#007aff";
+    c.lineWidth = 1.2;
+    c.strokeRect(x1 - 6, y1 - 6, x2 - x1 + 12, y2 - y1 + 12);
+    c.restore();
+  }
 }
 
 function strokeStyle(ctx, s, W) {
@@ -1982,9 +2823,39 @@ function strokeStyle(ctx, s, W) {
   ctx.lineJoin = "round";
 }
 
+function drawShape(ctx, s, W) {
+  const [[x1, y1], [x2, y2]] = s.points.map(([x, y]) => [x * W, y * W]);
+  ctx.beginPath();
+  if (s.shape === "rect") ctx.rect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+  else if (s.shape === "ellipse") ctx.ellipse((x1 + x2) / 2, (y1 + y2) / 2, Math.abs(x2 - x1) / 2, Math.abs(y2 - y1) / 2, 0, 0, Math.PI * 2);
+  else if (s.shape === "triangle") {
+    ctx.moveTo((x1 + x2) / 2, y1);
+    ctx.lineTo(x2, y2);
+    ctx.lineTo(x1, y2);
+    ctx.closePath();
+  } else {
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    if (s.shape === "arrow") {
+      const ang = Math.atan2(y2 - y1, x2 - x1);
+      const len = Math.max(10, ctx.lineWidth * 4);
+      for (const d of [-0.45, 0.45]) {
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - len * Math.cos(ang + d), y2 - len * Math.sin(ang + d));
+      }
+    }
+  }
+  ctx.stroke();
+}
+
 function drawStroke(ctx, s, W) {
   ctx.save();
   strokeStyle(ctx, s, W);
+  if (s.kind === "shape") {
+    drawShape(ctx, s, W);
+    ctx.restore();
+    return;
+  }
   const pts = s.points.map(([x, y]) => [x * W, y * W]);
   ctx.beginPath();
   if (pts.length === 1) {
@@ -2021,17 +2892,21 @@ function drawSegment(ctx, s, W, i) {
   ctx.restore();
 }
 
-function renderStrokesToDataUrl(doc) {
+// Zeichnungen einer Seite als Bild (für den Export)
+function renderStrokesForPage(doc, page) {
   if (!doc.strokes?.length) return null;
   const W = SHEET_BASE_WIDTH;
-  const maxY = Math.max(...doc.strokes.flatMap((s) => s.points.map((p) => p[1])));
+  const top = page * STRIDE;
+  const onPage = doc.strokes.some((s) => strokePoints(s).some(([, y]) => y * W >= top - 40 && y * W <= top + PAGE_H + 40));
+  if (!onPage) return null;
   const c = document.createElement("canvas");
   c.width = W * 2;
-  c.height = Math.ceil((maxY * W + 40) * 2);
+  c.height = PAGE_H * 2;
   const ctx = c.getContext("2d");
   ctx.scale(2, 2);
+  ctx.translate(0, -top);
   for (const s of doc.strokes) drawStroke(ctx, s, W);
-  return { url: c.toDataURL("image/png"), height: c.height / 2 };
+  return c.toDataURL("image/png");
 }
 
 // ---------- Rechte Seitenleiste: Aufgaben-Vorlagen & Design ----------
@@ -2234,19 +3109,13 @@ function insertTaskTemplate(draft) {
       parts.push(ANSWER_FORMS[sform].html);
     });
   });
-  const firstNew = editorEl.children.length;
-  const lastEmpty = editorEl.lastElementChild && !editorEl.lastElementChild.textContent.trim() && editorEl.lastElementChild.tagName === "P";
-  if (lastEmpty) editorEl.lastElementChild.remove();
-  editorEl.insertAdjacentHTML("beforeend", parts.join(""));
-  onEditorInput();
-  normalizeBlocks();
+  const inserted = appendBlocks(parts.join(""));
   // Cursor in das erste Feld zum Ausfüllen setzen
-  const inserted = [...editorEl.children].slice(lastEmpty ? firstNew - 1 : firstNew);
   const target = inserted
     .flatMap((el) => (/^(UL|OL)$/.test(el.tagName) ? [...el.children] : [el]))
     .find((el) => !/^H[1-3]$/.test(el.tagName) && !el.querySelector("i") && el.textContent.replace(/[^:]*:/, "").trim() === "");
   if (target) {
-    editorEl.focus();
+    (target.closest(".box") || editorEl).focus();
     const r = document.createRange();
     r.selectNodeContents(target);
     r.collapse(false);
@@ -2259,7 +3128,7 @@ function insertTaskTemplate(draft) {
 
 // Fertige Designs zum Antippen
 const THEMES = {
-  classic: { label: "Klassisch", pageColor: "#ffffff", accentColor: "", headingColor: "#1c1c1e" },
+  classic: { label: "Klassisch", pageColor: "#ffffff", accentColor: "", headingColor: "" },
   blue: { label: "Blau", pageColor: "#f6f9ff", accentColor: "#0a5bd3", headingColor: "#0a3d7a" },
   green: { label: "Grün", pageColor: "#f5faf5", accentColor: "#1f8a3b", headingColor: "#145c28" },
   warm: { label: "Warm", pageColor: "#fbf7ee", accentColor: "#c25e00", headingColor: "#6b3a10" },
@@ -2284,9 +3153,17 @@ function renderDesignPanel(panel) {
             ${t.label}</button>`;
         })
         .join("")}</div>
-      <div class="field"><span>Blatt</span><div class="seg" id="dsPaper">${Object.entries(PAPERS)
-        .map(([k, v]) => `<button data-paper="${k}" class="${k === doc.paper ? "on" : ""}">${v}</button>`)
-        .join("")}</div></div>
+      <div class="field"><span>Blatt</span><div class="hint">${PAPERS[doc.paper]} – beim Erstellen festgelegt${isFree(doc) ? " · Textblöcke frei verschiebbar (⠿)" : " · fließender Text wie in Word"}</div></div>
+      ${
+        isFree(doc)
+          ? ""
+          : `<div class="field"><span>Seitenränder</span>
+        <label class="range-row">Links <input type="range" min="1" max="5" step="0.25" data-m="l" value="${doc.margins.l}"><b>${doc.margins.l} cm</b></label>
+        <label class="range-row">Rechts <input type="range" min="1" max="5" step="0.25" data-m="r" value="${doc.margins.r}"><b>${doc.margins.r} cm</b></label></div>
+      <div class="field"><span>Zeilenabstand</span><div class="seg" id="dsSpacing">${[1, 1.15, 1.5, 2]
+        .map((v) => `<button data-sp="${v}" class="${v === doc.spacing ? "on" : ""}">${String(v).replace(".", ",")}</button>`)
+        .join("")}</div></div>`
+      }
       <div class="field"><span>Eigene Farben</span>
         <div class="color-row">
           <label><input type="color" data-c="pageColor" value="${esc(d.pageColor || "#ffffff")}"> Blatt</label>
@@ -2309,11 +3186,18 @@ function renderDesignPanel(panel) {
         $("[data-close]", panel).onclick = () => ((ui.panel = null), renderSidePanel());
       })
   );
-  $$("#dsPaper button", panel).forEach(
+  $$("[data-m]", panel).forEach((inp) => {
+    inp.oninput = () => {
+      doc.margins[inp.dataset.m] = Number(inp.value);
+      inp.nextElementSibling.textContent = `${String(inp.value).replace(".", ",")} cm`;
+      apply();
+    };
+  });
+  $$("#dsSpacing button", panel).forEach(
     (b) =>
       (b.onclick = () => {
-        doc.paper = b.dataset.paper;
-        $$("#dsPaper button", panel).forEach((x) => x.classList.toggle("on", x === b));
+        doc.spacing = Number(b.dataset.sp);
+        $$("#dsSpacing button", panel).forEach((x) => x.classList.toggle("on", x === b));
         apply();
       })
   );
@@ -2327,7 +3211,7 @@ function renderDesignPanel(panel) {
   );
   $("#dsAll", panel).onclick = () => {
     const same = semDocs().filter((x) => x.moduleId === doc.moduleId && x.id !== doc.id);
-    same.forEach((x) => Object.assign(x, { design: { ...doc.design }, paper: doc.paper }));
+    same.forEach((x) => Object.assign(x, { design: { ...doc.design } }));
     persist();
     toast(`Design für ${same.length + 1} Blätter übernommen`);
   };
@@ -2725,29 +3609,17 @@ async function exportDialog(docs, name) {
   if (fmt) exportDocs(docs, fmt, name);
 }
 
+// Zusatz-Stile nur für den Export: echte A4-Seiten zum Drucken / als PDF
 const EXPORT_CSS = `
-  body { margin: 0; background: #f2f2f7; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .sheet { --line: 28px; --rule: #bcd3ea; --pad-l: 64px; --pad-r: 104px; width: 794px; min-height: 1123px; box-sizing: border-box; margin: 24px auto; background: var(--page-bg, #fff); color: #1c1c1e; padding: 58px var(--pad-r) 48px var(--pad-l); position: relative; box-shadow: 0 2px 12px rgba(0,0,0,.12); font-family: var(--doc-font); font-size: var(--doc-size); page-break-after: always; break-after: page; }
-  .sheet:last-child { page-break-after: auto; break-after: auto; }
-  .paper-lined::after, .paper-grid::after { content: ""; position: absolute; top: 0; bottom: 0; right: calc(var(--pad-r) - 18px); width: 1.5px; background: rgba(224,32,27,.45); }
-  .sheet-date { position: absolute; top: 18px; right: 22px; text-align: right; font-size: 10.5pt; color: #3a3a3c; }
-  .doc-title { font-size: 28pt; font-weight: 800; line-height: 1.25; margin: 0 0 14px; color: var(--doc-accent); }
-  .page-content { line-height: var(--line); margin: 0 calc(var(--pad-r) * -1) 0 calc(var(--pad-l) * -1); padding: 0 var(--pad-r) 0 var(--pad-l); min-height: 760px; }
-  .page-content p { margin: 0; min-height: var(--line); }
-  .page-content h1 { font-size: 22pt; font-weight: 800; color: var(--heading); line-height: calc(var(--line) * 2); margin: 0 calc(var(--pad-r) * -1) -8px calc(var(--pad-l) * -1); padding: 8px var(--pad-r) 0 var(--pad-l); background: linear-gradient(var(--page-bg), var(--page-bg)) no-repeat 0 2px / 100% calc(var(--line) * 2 - 4px); }
-  .page-content h2 { font-size: 16pt; font-weight: 700; line-height: var(--line); margin: 0; color: var(--heading); }
-  .page-content h3 { font-size: 13pt; font-weight: 700; line-height: var(--line); margin: 0; color: var(--heading); }
-  ul, ol { margin: 0; padding-left: 26px; }
-  .paper-lined .page-content { background-image: linear-gradient(to bottom, transparent calc(var(--line) - 7px), var(--rule) calc(var(--line) - 7px), var(--rule) calc(var(--line) - 6px), transparent calc(var(--line) - 6px)); background-size: 100% var(--line); }
-  .paper-grid .page-content { background-image: linear-gradient(to bottom, transparent 19px, #dbe3ec 19px), linear-gradient(to right, transparent 19px, #dbe3ec 19px); background-size: 20px 20px; }
-  span.term, .term-name { color: #e0201b; font-weight: 600; }
-  .drawing { position: absolute; left: 0; top: 0; width: 794px; pointer-events: none; }
-  .glossary { margin-top: 36px; border-top: 2px solid var(--doc-accent); padding-top: 12px; font-size: 10.5pt; line-height: 1.5; }
-  .glossary h4 { margin: 0 0 8px; font-size: 11pt; text-transform: uppercase; letter-spacing: .6px; }
-  .glossary dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 6px 16px; }
-  .glossary dd { margin: 0; }
+  html, body { margin: 0; background: #e5e5ea; -webkit-print-color-adjust: exact; print-color-adjust: exact; overflow: visible !important; height: auto !important; }
+  .ex-page { position: relative; width: 794px; height: 1123px; margin: 24px auto; padding: 0; overflow: hidden; break-after: page; page-break-after: always; }
+  .ex-page:last-child { break-after: auto; page-break-after: auto; }
+  .ex-page .bg-page { top: 0; height: 1123px; }
+  .ex-page .page-content { min-height: 0; }
+  .ex-page .drawing { position: absolute; left: 0; top: 0; width: 794px; height: 1120px; z-index: 2; }
+  .ex-page.glossary-only { height: auto; min-height: 1123px; background: var(--page-bg); box-shadow: var(--shadow); padding: 56px 64px; box-sizing: border-box; }
   @page { size: A4; margin: 0; }
-  @media print { body { background: none; } .sheet { margin: 0; box-shadow: none; } }`;
+  @media print { html, body { background: none; } .ex-page { margin: 0; } .ex-page .bg-page { box-shadow: none; border-radius: 0; } }`;
 
 function docTerms(doc) {
   const box = document.createElement("div");
@@ -2757,35 +3629,118 @@ function docTerms(doc) {
     const term = t.textContent.trim().replace(/[.,;:!?]+$/, "");
     if (term && !map.has(term.toLowerCase())) map.set(term.toLowerCase(), term);
   }
-  return [...map.values()].map((t) => ({ term: t, explanation: doc.glossary?.[t.toLowerCase()]?.explanation || "" }));
+  return [...map.values()]
+    .sort((a, b) => a.localeCompare(b, "de"))
+    .map((t) => ({ term: t, explanation: doc.glossary?.[t.toLowerCase()]?.explanation || "" }));
 }
 
 const docHeading = (doc) => doc.heading ?? (doc.moduleId ? moduleName(doc.moduleId) : doc.title);
 
-function docToSheetHtml(doc) {
+function docVars(doc) {
   const d = doc.design || {};
-  const drawing = renderStrokesToDataUrl(doc);
-  const terms = docTerms(doc);
-  const style = `--page-bg:${d.pageColor || "#fff"};--heading:${d.headingColor || "#1c1c1e"};--doc-accent:${d.accentColor || moduleColor(doc.moduleId)};--doc-font:${FONTS[doc.font] || FONTS[state.settings.font]};${
-    drawing ? `min-height:${Math.max(1123, drawing.height)}px` : ""
-  }`;
-  return `<section class="sheet paper-${doc.paper}" style="${esc(style)}">
-    <div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div>
-    <div class="doc-title">${esc(docHeading(doc))}</div>
-    <div class="page-content">${stripBids(sanitizeHtml(doc.html))}</div>
-    ${
-      terms.length
-        ? `<div class="glossary"><h4>Fachbegriffe</h4><dl>${terms.map((t) => `<dt class="term-name">${esc(t.term)}</dt><dd>${esc(t.explanation || "–")}</dd>`).join("")}</dl></div>`
-        : ""
-    }
-    ${drawing ? `<img class="drawing" src="${drawing.url}" alt="">` : ""}
-  </section>`;
+  const accent = d.accentColor || moduleColor(doc.moduleId);
+  const ins = insets(doc);
+  return `--page-bg:${d.pageColor || "#fff"};--heading:${d.headingColor || accent};--doc-accent:${accent};--doc-font:${
+    FONTS[doc.font] || FONTS[state.settings.font]
+  };--doc-size:${state.settings.fontSize}pt;--pad-l:${ins.l}px;--pad-r:${ins.r}px;--spacing:${doc.spacing || 1.5}`;
 }
 
-function exportHtmlDocument(docs, name) {
+// Inhalt ohne freie Blöcke (für Word, Markdown, Text): Blöcke von oben nach unten
+function flatHtml(doc) {
+  const box = document.createElement("div");
+  box.innerHTML = sanitizeHtml(doc.html);
+  const blocks = $$(":scope > .box", box);
+  if (!blocks.length) return stripBids(box.innerHTML);
+  return stripBids(
+    blocks
+      .sort((a, b) => a.dataset.y - b.dataset.y || a.dataset.x - b.dataset.x)
+      .map((b) => (b.classList.contains("img-box") ? b.innerHTML.replace("<img ", '<img style="width:60%" ') : b.innerHTML))
+      .join("")
+  );
+}
+
+// Baut das Blatt unsichtbar auf, rechnet die Seiten aus und teilt alles auf echte A4-Seiten auf
+function docToPagesHtml(doc) {
+  const free = isFree(doc);
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:-30000px;top:0;visibility:hidden;pointer-events:none";
+  host.innerHTML = `<div class="sheet paper-${doc.paper} ${free ? "free" : "flow"}" style="${docVars(doc)}">
+    <div class="sheet-bg"></div><div class="doc-title">${esc(docHeading(doc))}</div><div class="page-content">${sanitizeHtml(doc.html)}</div></div>`;
+  document.body.appendChild(host);
+  const sheet = host.firstElementChild;
+  const editor = $(".page-content", sheet);
+  $$(":scope > .box", editor).forEach(placeBox);
+  const pages = layoutPages(sheet, editor, { ...doc, pages: doc.pages || 1 }, 1);
+  const pageOf = (el) => Math.max(0, Math.min(pages - 1, Math.floor((el.getBoundingClientRect().top - sheet.getBoundingClientRect().top + 1) / STRIDE)));
+  const content = Array.from({ length: pages }, () => []);
+  const clean = (el) => {
+    const c = el.cloneNode(true);
+    c.style.marginTop = "";
+    $$("[style]", c).forEach((x) => (x.style.marginTop = ""));
+    return c;
+  };
+
+  if (free) {
+    for (const b of $$(":scope > .box", editor)) {
+      const y = Number(b.dataset.y);
+      const n = Math.max(0, Math.min(pages - 1, Math.floor(y / STRIDE)));
+      const c = clean(b);
+      Object.assign(c.style, { left: b.dataset.x + "px", top: y - n * STRIDE + "px", width: b.dataset.w + "px" });
+      content[n].push(c.outerHTML);
+    }
+  } else {
+    for (const el of [...editor.children]) {
+      if (/^(UL|OL)$/.test(el.tagName)) {
+        let group = null;
+        let groupPage = -1;
+        [...el.children].forEach((li, i) => {
+          const n = pageOf(li);
+          if (n !== groupPage) {
+            group = el.cloneNode(false);
+            group.style.marginTop = "";
+            if (el.tagName === "OL" && i) group.setAttribute("start", i + 1);
+            content[n].push(group);
+            groupPage = n;
+          }
+          group.appendChild(clean(li));
+        });
+      } else content[pageOf(el)].push(clean(el));
+    }
+  }
+  host.remove();
+
+  const ins = insets(doc);
+  const terms = docTerms(doc);
+  const pagesHtml = content.map((items, n) => {
+    const html = items.map((x) => (typeof x === "string" ? x : x.outerHTML)).join("");
+    const pos = free ? "left:0;right:0;top:0" : `left:${ins.l}px;right:${ins.r}px;top:${n ? PAGE_TOP : CONTENT_TOP}px`;
+    const drawing = renderStrokesForPage(doc, n);
+    return `<section class="ex-page sheet paper-${doc.paper} ${free ? "free" : "flow"}" style="${docVars(doc)}">
+      <div class="sheet-bg"><div class="bg-page"><div class="pg-lines" style="top:${n ? 0 : CONTENT_TOP}px"></div><span class="pg-num">${n + 1}</span></div></div>
+      ${n === 0 ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div><div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px">${esc(docHeading(doc))}</div>` : ""}
+      <div class="page-content" style="position:absolute;${pos}">${stripBids(html)}</div>
+      ${drawing ? `<img class="drawing" src="${drawing}" alt="">` : ""}
+    </section>`;
+  });
+  if (terms.length) {
+    pagesHtml.push(`<section class="ex-page glossary-only sheet" style="${docVars(doc)}"><div class="glossary"><h4>Fachbegriffe</h4><dl>${terms
+      .map((t) => `<dt class="term-name">${esc(t.term)}</dt><dd>${esc(t.explanation || "–")}</dd>`)
+      .join("")}</dl></div></section>`);
+  }
+  return pagesHtml.join("");
+}
+
+let appCssCache = null;
+async function appCss() {
+  appCssCache ||= await fetch("styles.css").then((r) => r.text()).catch(() => "");
+  return appCssCache;
+}
+
+async function exportHtmlDocument(docs, name) {
   return `<!doctype html><html lang="de"><head><meta charset="utf-8"><title>${esc(name)}</title>
-    <style>:root{--doc-font:${FONTS[state.settings.font]};--doc-size:${state.settings.fontSize}pt}${EXPORT_CSS}</style></head>
-    <body>${docs.map(docToSheetHtml).join("")}</body></html>`;
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,700;1,400&display=swap">
+    <style>${await appCss()}${EXPORT_CSS}</style></head>
+    <body>${docs.map(docToPagesHtml).join("")}</body></html>`;
 }
 
 function htmlToMarkdown(html) {
@@ -2855,7 +3810,7 @@ function docToMarkdown(doc) {
   return [
     `# ${docHeading(doc) || doc.title}`,
     `_${doc.title} · ${moduleName(doc.moduleId)} · ${fmtLong(doc.createdAt)}_`,
-    htmlToMarkdown(stripBids(doc.html)),
+    htmlToMarkdown(flatHtml(doc)),
     terms.length ? `---\n\n**Fachbegriffe**\n\n${terms.map((t) => `- **${t.term}**: ${t.explanation || "–"}`).join("\n")}` : "",
   ]
     .filter(Boolean)
@@ -2870,12 +3825,12 @@ function docToText(doc) {
     .replace(/^_(.+)_$/gm, "$1");
 }
 
-function exportDocs(docs, fmt, name) {
+async function exportDocs(docs, fmt, name) {
   const file = safeFileName(name);
   if (fmt === "pdf") {
     const w = window.open("", "_blank");
     if (!w) return toast("Pop-up wurde blockiert – bitte erlauben.", "error");
-    w.document.write(exportHtmlDocument(docs, name));
+    w.document.write(await exportHtmlDocument(docs, name));
     w.document.close();
     setTimeout(() => {
       w.focus();
@@ -2883,17 +3838,17 @@ function exportDocs(docs, fmt, name) {
     }, 500);
     return;
   }
-  if (fmt === "html") return download(`${file}.html`, exportHtmlDocument(docs, name), "text/html");
+  if (fmt === "html") return download(`${file}.html`, await exportHtmlDocument(docs, name), "text/html");
   if (fmt === "doc") {
     const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(name)}</title>
-      <style>body{font-family:${FONTS[state.settings.font]};font-size:${state.settings.fontSize}pt} h1{font-size:20pt} h2{font-size:15pt} h3{font-size:12.5pt} .term,.term-name{color:#e0201b;font-weight:bold}</style></head><body>
+      <style>body{font-family:${FONTS[docs[0]?.font] || FONTS[state.settings.font]};font-size:${state.settings.fontSize}pt} h1{font-size:20pt} h2{font-size:15pt} h3{font-size:12.5pt} .term,.term-name{color:#e0201b;font-weight:bold} table{border-collapse:collapse} td,th{border:1px solid #999;padding:2px 6px} img{max-width:100%}</style></head><body>
       ${docs
         .map((d, i) => {
           const terms = docTerms(d);
-          const drawing = renderStrokesToDataUrl(d);
+          const drawings = Array.from({ length: d.pages || 1 }, (_, n) => renderStrokesForPage(d, n)).filter(Boolean);
           return `${i ? '<br style="page-break-before:always">' : ""}<p style="text-align:right;color:#666">${esc(moduleName(d.moduleId))} · ${esc(fmtLong(d.createdAt))}</p>
-            <h1 style="color:${esc(moduleColor(d.moduleId))}">${esc(docHeading(d) || d.title)}</h1>${stripBids(sanitizeHtml(d.html))}
-            ${drawing ? `<p><img src="${drawing.url}" width="600"></p>` : ""}
+            <h1 style="color:${esc(moduleColor(d.moduleId))}">${esc(docHeading(d) || d.title)}</h1>${flatHtml(d)}
+            ${drawings.map((u) => `<p><img src="${u}" width="600"></p>`).join("")}
             ${terms.length ? `<hr><h3>Fachbegriffe</h3>${terms.map((t) => `<p><span class="term-name">${esc(t.term)}</span>: ${esc(t.explanation || "–")}</p>`).join("")}` : ""}`;
         })
         .join("")}</body></html>`;
