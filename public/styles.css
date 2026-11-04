@@ -679,3 +679,14 @@ body.focus .toolbar .tb, body.focus .toolbar .seg button { height: 28px; padding
 body.focus .toolbar .btn.primary { padding: 4px 12px; }
 body.focus .subbar { padding: 3px 10px; min-height: 36px; }
 body.focus .doc-title-input { display: none; }
+
+/* Leeres Blatt wie Word: Zeilenabstand 1,15 innerhalb des Absatzes, 8 pt Abstand nach jedem Absatz,
+   mehr Luft vor Überschriften. (Liniert/kariert bleibt im 28-px-Raster auf den Linien.) */
+.flow :is(.page-content, .float-layer) { line-height: calc(var(--spacing) * 1.15); }
+.flow :is(.page-content, .float-layer) p { padding-bottom: 8pt; min-height: 1.15em; }
+.flow :is(.page-content, .float-layer) ul, .flow :is(.page-content, .float-layer) ol { padding-bottom: 8pt; }
+.flow :is(.page-content, .float-layer) li { padding-bottom: 0; }
+.flow :is(.page-content, .float-layer) h1 { padding: 16pt 0 6pt; line-height: 1.2; }
+.flow :is(.page-content, .float-layer) h2 { padding: 12pt 0 4pt; line-height: 1.25; }
+.flow :is(.page-content, .float-layer) h3 { padding: 10pt 0 3pt; line-height: 1.3; }
+.flow .page-content > :first-child:is(h1, h2, h3) { padding-top: 0; }
