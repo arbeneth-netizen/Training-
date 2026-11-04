@@ -535,6 +535,7 @@ function renderAll() {
 }
 
 function renderMain() {
+  applyFocusClass();
   const main = $("#main");
   main.onpaste = null;
   if (ui.view === "editor" && docById(ui.docId)) return renderEditor(main);
@@ -1513,10 +1514,15 @@ function renderEditor(main) {
 }
 
 // Vollbild: Seitenleisten weg, Blatt so groß wie möglich (Hoch- und Querformat)
+// Gilt nur im Blatt – in der Dateiübersicht sind Seitenleiste & Stundenplan immer da
+function applyFocusClass() {
+  document.body.classList.toggle("focus", ui.view === "editor" && localStorage.getItem("nh-focus") === "1");
+}
+
 function toggleFocus(force) {
   const on = force ?? !document.body.classList.contains("focus");
-  document.body.classList.toggle("focus", on);
   localStorage.setItem("nh-focus", on ? "1" : "");
+  applyFocusClass();
   if (on && ui.panel) {
     ui.panel = null;
     renderSidePanel();
@@ -4847,7 +4853,6 @@ $("#sidebarToggle").addEventListener("click", () => $("#sidebar").classList.togg
   if (!state.semesters.some((s) => s.id === state.currentSemesterId)) state.currentSemesterId = state.semesters[0].id;
   state.files ||= [];
   applySettings();
-  document.body.classList.toggle("focus", localStorage.getItem("nh-focus") === "1");
   renderAll();
   // Offline-Speicher für die App auf dem Home-Bildschirm
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});

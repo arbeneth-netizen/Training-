@@ -1,6 +1,6 @@
 // Offline-Speicher: Die App öffnet sofort aus dem Speicher des iPads –
 // auch ohne Internet und auch wenn der Server gerade „schläft“. Neue Versionen werden im Hintergrund geholt.
-const CACHE = "notizheft-v3";
+const CACHE = "notizheft-v4";
 const SHELL = ["/", "/app.js", "/styles.css", "/icon.svg", "/manifest.webmanifest", "/apple-touch-icon.png", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
