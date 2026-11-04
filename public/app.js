@@ -1432,7 +1432,7 @@ function renderEditor(main) {
               }</div>
               <input class="doc-title" id="docTitle" value="${esc(doc.heading)}" placeholder="Überschrift" autocomplete="off" spellcheck="true" autocapitalize="sentences">
               <div class="page-content" id="editor" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="de"
-                data-placeholder="${isPdf(doc) ? "" : "Einfach lostippen …   # Überschrift · - Liste · rot = Fachbegriff"}"></div>
+                data-placeholder=""></div>
               <div class="float-layer" id="floats"></div>
               <canvas class="draw-layer" id="drawLayer"></canvas>
               <div class="box-tools" id="boxTools" hidden>
@@ -1533,6 +1533,7 @@ function toggleFocus(force) {
 let fitObs = null;
 let sheetScale = 1;
 let userZoom = Number(localStorage.getItem("nh-zoom")) || 1;
+let fitBase = 1;
 let refit = () => {};
 
 function setZoom(z, anchorY) {
@@ -1559,7 +1560,8 @@ function setupFit() {
     let base = Math.max(0.35, Math.min(1.6, avail / SHEET_BASE_WIDTH));
     // Nahe 100 % genau 100 % nehmen: gestochen scharfe Schrift und flüssiges Markieren
     if (base > 0.94 && base < 1.12) base = 1;
-    sheetScale = Math.round(base * userZoom * 100) / 100;
+    fitBase = base;
+    sheetScale = Math.round(base * (ui.tool === "pen" ? userZoom : 1) * 100) / 100;
     stack.style.transform = sheetScale === 1 ? "none" : `scale(${sheetScale})`;
     zoom.style.width = SHEET_BASE_WIDTH * sheetScale + "px";
     zoom.style.height = stack.offsetHeight * sheetScale + "px";
@@ -1571,22 +1573,45 @@ function setupFit() {
   fitObs.observe(scroll);
   fitObs.observe(stack);
   fit();
-  // Zoomen: mit zwei Fingern (iPad), Strg + Mausrad oder den Knöpfen unten links
-  let gestureStart = 1;
+  // Zoomen nur im Stift-Modus: mit zwei Fingern (iPad), Strg + Mausrad oder den Knöpfen unten links.
+  // Erst ab deutlicher Bewegung, und während der Geste nur „optisch“ – das verhindert Wackeln.
+  let gesture = null;
+  const stack2 = $("#sheetStack");
+  const zoomEl = $("#sheetZoom");
   scroll.addEventListener("gesturestart", (e) => {
     e.preventDefault();
-    gestureStart = userZoom;
+    if (ui.tool !== "pen") return;
+    const r = scroll.getBoundingClientRect();
+    const ax = e.clientX - r.left;
+    const ay = e.clientY - r.top;
+    gesture = { z0: userZoom, s0: sheetScale, ax, ay, cx: (scroll.scrollLeft + ax) / sheetScale, cy: (scroll.scrollTop + ay) / sheetScale, active: false, z: userZoom };
   });
   scroll.addEventListener("gesturechange", (e) => {
     e.preventDefault();
-    setZoom(gestureStart * e.scale, e.clientY - scroll.getBoundingClientRect().top);
+    if (!gesture) return;
+    // Totzone: kleine, unabsichtliche Bewegungen ignorieren
+    if (!gesture.active && Math.abs(e.scale - 1) < 0.12) return;
+    gesture.active = true;
+    const z = Math.max(0.6, Math.min(3, gesture.z0 * e.scale));
+    gesture.z = z;
+    const scale = Math.round(fitBase * z * 100) / 100;
+    stack2.style.transform = `scale(${scale})`;
+    zoomEl.style.width = SHEET_BASE_WIDTH * scale + "px";
+    zoomEl.style.height = stack2.offsetHeight * scale + "px";
+    scroll.scrollLeft = gesture.cx * scale - gesture.ax;
+    scroll.scrollTop = gesture.cy * scale - gesture.ay;
+  });
+  scroll.addEventListener("gestureend", (e) => {
+    e.preventDefault();
+    if (gesture?.active) setZoom(gesture.z, gesture.ay);
+    gesture = null;
   });
   scroll.addEventListener(
     "wheel",
     (e) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setZoom(userZoom * (e.deltaY < 0 ? 1.08 : 0.92), e.clientY - scroll.getBoundingClientRect().top);
+      if (ui.tool === "pen") setZoom(userZoom * (e.deltaY < 0 ? 1.08 : 0.92), e.clientY - scroll.getBoundingClientRect().top);
     },
     { passive: false }
   );
@@ -2112,6 +2137,8 @@ function setTool(tool) {
   }
   renderToolSeg();
   renderSubbar();
+  refit();
+  $("#zoomLabel") && ($("#zoomLabel").textContent = Math.round(userZoom * 100) + " %");
   if (tool === "text") focusEditorStart();
 }
 
@@ -3287,11 +3314,23 @@ function setupCanvas() {
     drawStroke(ctx(), current, sheetEl.clientWidth);
   };
   canvasEl.addEventListener("pointerdown", (e) => ui.tool === "pen" && startDraw(e));
+  let stylusUntil = 0;
+  sheetEl.addEventListener(
+    "touchmove",
+    (e) => {
+      const stylus = [...e.touches].some((t) => t.touchType === "stylus");
+      if (stylus) stylusUntil = Date.now() + 400;
+      // Handfläche liegt beim Schreiben auf → nicht scrollen
+      if (ui.tool === "pen" && (stylus || Date.now() < stylusUntil) && e.touches.length === 1) e.preventDefault();
+    },
+    { passive: false }
+  );
   // Der Pencil soll beim Malen das Blatt nicht verschieben, der Finger schon
   sheetEl.addEventListener(
     "touchstart",
     (e) => {
       const stylus = [...e.touches].some((t) => t.touchType === "stylus");
+      if (stylus) stylusUntil = Date.now() + 400;
       if (stylus && (ui.tool === "pen" || state.settings.pencilDraws !== false)) e.preventDefault();
       if (!stylus && ui.tool === "pen" && state.settings.fingerDraw) e.preventDefault();
     },
@@ -3514,6 +3553,7 @@ function canvasRatio(w, h) {
 
 function redrawCanvas() {
   if (!canvasEl) return;
+  sheetEl.classList.toggle("has-ink", currentDoc().strokes.length > 0);
   const c = canvasEl.getContext("2d");
   const ratio = canvasRatio(sheetEl.clientWidth, sheetEl.offsetHeight);
   const W = sheetEl.clientWidth;

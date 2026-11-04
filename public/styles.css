@@ -690,3 +690,10 @@ body.focus .doc-title-input { display: none; }
 .flow :is(.page-content, .float-layer) h2 { padding: 12pt 0 4pt; line-height: 1.25; }
 .flow :is(.page-content, .float-layer) h3 { padding: 10pt 0 3pt; line-height: 1.3; }
 .flow .page-content > :first-child:is(h1, h2, h3) { padding-top: 0; }
+
+/* Platzhalter „Überschrift“ verschwindet, sobald mit dem Stift geschrieben wurde */
+.sheet.has-ink .doc-title::placeholder, .sheet.pen-mode .doc-title::placeholder { color: transparent; }
+/* Zoom nur im Stift-Modus */
+.zoom-ctl { display: none; }
+.editor-body:has(.sheet.pen-mode) .zoom-ctl { display: flex; }
+.canvas-scroll:not(:has(.sheet.pen-mode)) { touch-action: pan-x pan-y; }
