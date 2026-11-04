@@ -79,7 +79,13 @@ function isLoggedIn(req) {
 
 function loginPage(error = "") {
   return `<!doctype html><html lang="de"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Notizheft</title><link rel="icon" href="data:,">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Notizheft</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Notizheft">
 <style>
   :root { --bg:#f2f2f7; --panel:#fff; --text:#1c1c1e; --muted:#8e8e93; --border:#d9d9de; }
   @media (prefers-color-scheme: dark) { :root { --bg:#1c1c1e; --panel:#2c2c2e; --text:#f2f2f7; --border:#3a3a3c; } }
