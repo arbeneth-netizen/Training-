@@ -92,10 +92,10 @@ function loginPage(error = "") {
   body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:16px; box-sizing:border-box;
     background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif; }
   form { background:var(--panel); border-radius:16px; padding:28px; width:340px; max-width:100%; box-shadow:0 8px 30px rgba(0,0,0,.12); }
-  h1 { margin:0 0 4px; font-size:22px; } h1::before { content:"● "; color:#ff9f0a; }
+  h1 { margin:0 0 4px; font-size:22px; } 
   p { margin:0 0 18px; color:var(--muted); font-size:14px; }
   input { width:100%; box-sizing:border-box; font-size:17px; padding:11px 12px; border:1px solid var(--border); border-radius:10px; background:var(--panel); color:var(--text); }
-  button { margin-top:12px; width:100%; font-size:17px; font-weight:600; padding:11px; border:0; border-radius:10px; background:#ff9f0a; color:#fff; }
+  button { margin-top:12px; width:100%; font-size:17px; font-weight:600; padding:11px; border:0; border-radius:10px; background:#2d5bd7; color:#fff; }
   .err { color:#ff3b30; margin:10px 0 0; font-size:14px; }
 </style></head><body>
 <form method="post" action="/login">

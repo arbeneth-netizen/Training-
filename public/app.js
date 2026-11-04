@@ -59,6 +59,59 @@ function download(name, content, type) {
   setTimeout(() => URL.revokeObjectURL(a.href), 2000);
 }
 
+// Schlichte Linien-Symbole statt Emojis
+const ICON_PATHS = {
+  folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
+  upload: '<path d="M12 15V4M7 9l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>',
+  download: '<path d="M12 4v11M7 10l5 5 5-5"/><path d="M5 20h14"/>',
+  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  move: '<path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>',
+  palette: '<path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.6-.9 1.2-1.8-.5-1-.1-2.2 1.1-2.2H17a4 4 0 0 0 4-4c0-5.5-4-10-9-10z"/><circle cx="7.5" cy="11" r="1"/><circle cx="10" cy="7" r="1"/><circle cx="15" cy="7.5" r="1"/>',
+  check: '<path d="M4 7h8M4 12h6M4 17h4M13 16l3 3 5-6"/>',
+  back: '<path d="M15 18l-6-6 6-6"/>',
+  expand: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+  list: '<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+  pen: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  text: '<path d="M5 7V5h14v2M12 5v14M9 19h6"/>',
+  marker: '<path d="M9 11l6-6 4 4-6 6M9 11l-4 4v4h4l4-4M4 21h7"/>',
+  eraser: '<path d="M7 21h12M3 15l9-9 7 7-6 6H9z"/>',
+  lasso: '<ellipse cx="12" cy="9" rx="8" ry="5" stroke-dasharray="3 3"/><path d="M7 13c-1.5 2-.5 5 2.5 6"/>',
+  shapes: '<rect x="3" y="12" width="8" height="8" rx="1"/><circle cx="16.5" cy="7.5" r="4.5"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/>',
+  redo: '<path d="M15 14l5-5-5-5"/><path d="M20 9H10a6 6 0 0 0 0 12h2"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-8 8"/>',
+  more: '<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  grip: '<circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/>',
+  align: '<path d="M4 6h16M4 12h10M4 18h16"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
+  notes: '<path d="M6 3h11a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6z"/><path d="M6 3v18M10 8h6M10 12h6M10 16h4"/>',
+  bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+  task: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 12l2 2 4-4"/>',
+  notebook: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 7H3M5 12H3M5 17H3M9 3v18"/>',
+  zoomIn: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M8 11h6M11 8v6"/>',
+  zoomOut: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5M8 11h6"/>',
+  book: '<path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 19V5"/>',
+  flask: '<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/>',
+  scale: '<path d="M12 3v18M7 21h10M5 7h14M5 7l-3 6a3 3 0 0 0 6 0zM19 7l-3 6a3 3 0 0 0 6 0z"/>',
+  bulb: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/>',
+  chart: '<path d="M4 20V4M4 20h16M8 16v-5M12 16V8M16 16v-8"/>',
+  briefcase: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5h6v2M3 12h18"/>',
+  code: '<path d="M8 8l-4 4 4 4M16 8l4 4-4 4"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  star: '<path d="M12 3l2.7 5.6 6.3.9-4.5 4.4 1 6.1-5.5-2.9-5.5 2.9 1-6.1L3 9.5l6.3-.9z"/>',
+};
+const icon = (name, size = 18) =>
+  `<svg class="ic" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ""}</svg>`;
+
 const safeFileName = (s) => (s || "Notiz").replace(/[\\/:*?"<>|]+/g, "-").trim().slice(0, 80) || "Notiz";
 
 // ============================================================
@@ -79,15 +132,15 @@ const FONTS = {
 };
 
 const KINDS = {
-  quick: { label: "Schnellnotiz", ico: "⚡", desc: "Kurz etwas festhalten", key: "1" },
-  notes: { label: "Mitschrift", ico: "📝", desc: "Vorlesung / Seminar mitschreiben", key: "2" },
-  task: { label: "Aufgabe", ico: "✏️", desc: "Seminaraufgabe bearbeiten", key: "3" },
-  block: { label: "Collegeblock", ico: "📒", desc: "Freies Notieren – wird nie verarbeitet", key: "4" },
+  quick: { label: "Schnellnotiz", ico: "bolt", desc: "Kurz etwas festhalten", key: "1" },
+  notes: { label: "Mitschrift", ico: "notes", desc: "Vorlesung / Seminar mitschreiben", key: "2" },
+  task: { label: "Aufgabe", ico: "task", desc: "Seminaraufgabe bearbeiten", key: "3" },
+  block: { label: "Collegeblock", ico: "notebook", desc: "Freies Notieren – wird nie verarbeitet", key: "4" },
 };
 
 const PAPERS = { lined: "Liniert", blank: "Normal", grid: "Kariert" };
 
-const MODULE_COLORS = ["#ff9f0a", "#0a84ff", "#30d158", "#bf5af2", "#ff375f", "#64d2ff", "#ffd60a", "#ac8e68", "#5e5ce6", "#ff6b35"];
+const MODULE_COLORS = ["#2d5bd7", "#0f766e", "#b45309", "#7c3aed", "#be123c", "#0369a1", "#4d7c0f", "#a16207", "#475569", "#c2410c"];
 const TEXT_COLORS = [
   ["#1c1c1e", "Schwarz"],
   ["#0a5bd3", "Blau"],
@@ -96,10 +149,10 @@ const TEXT_COLORS = [
 const PEN_COLORS = ["#1c1c1e", "#0a5bd3", "#e0201b", "#1f8a3b"];
 // Stiftarten – alle mit Farben
 const PEN_TOOLS = [
-  ["ballpoint", "🖊 Kugelschreiber", 3],
-  ["fountain", "✒️ Füller", 4],
-  ["pencil", "✏️ Bleistift", 3],
-  ["crayon", "🖍 Buntstift", 5],
+  ["ballpoint", "Kugelschreiber", 3],
+  ["fountain", "Füller", 4],
+  ["pencil", "Bleistift", 3],
+  ["crayon", "Buntstift", 5],
 ];
 const MARKER_COLORS = ["rgba(255,214,10,0.45)", "rgba(52,199,89,0.35)", "rgba(255,105,180,0.35)", "rgba(100,210,255,0.4)"];
 const EXAM_TYPES = ["Klausur", "Hausarbeit", "Präsentation", "Referat", "Mündliche Prüfung", "Portfolio", "Essay", "Protokoll", "Studienleistung", "Unbenotet"];
@@ -170,7 +223,7 @@ async function writeState() {
   }
 }
 
-const persist = debounce(writeState, 400);
+const persist = debounce(writeState, 1200);
 
 // ============================================================
 // Zustand
@@ -393,9 +446,9 @@ function renderSidebar() {
   sb.innerHTML = `
     <div class="side-section">
       <div class="side-title">Bibliothek</div>
-      <button class="side-item ${active(ui.view === "files" && ui.loc.moduleId === undefined)}" data-nav="root"><span class="ico">🗂</span><span class="name">Alle Dateien</span></button>
-      <button class="side-item ${active(ui.view === "recent")}" data-nav="recent"><span class="ico">🕘</span><span class="name">Zuletzt</span></button>
-      <button class="side-item ${active(ui.view === "timetable")}" data-nav="timetable"><span class="ico">📅</span><span class="name">Stundenplan &amp; Module</span></button>
+      <button class="side-item ${active(ui.view === "files" && ui.loc.moduleId === undefined)}" data-nav="root"><span class="ico">${icon("folder")}</span><span class="name">Alle Dateien</span></button>
+      <button class="side-item ${active(ui.view === "recent")}" data-nav="recent"><span class="ico">${icon("clock")}</span><span class="name">Zuletzt</span></button>
+      <button class="side-item ${active(ui.view === "timetable")}" data-nav="timetable"><span class="ico">${icon("calendar")}</span><span class="name">Stundenplan &amp; Module</span></button>
     </div>
     <div class="side-section">
       <div class="side-title">Module <button data-nav="add-module" title="Modul hinzufügen">＋</button></div>
@@ -407,7 +460,7 @@ function renderSidebar() {
           <label class="color-dot" style="background:${esc(m.color)}" title="Farbe ändern"><input type="color" value="${esc(m.color)}" data-color="${m.id}"></label>
           <span class="name">${esc(m.name)}</span>
           <span class="meta">${m.examType ? esc(m.examType) : count(m.id) || ""}</span>
-          <button class="open-files" data-files="${m.id}" title="Dateien ansehen">📁</button>
+          <button class="open-files" data-files="${m.id}" title="Dateien ansehen">${icon("folder", 16)}</button>
         </div>`
         )
         .join("")}
@@ -415,7 +468,7 @@ function renderSidebar() {
         <span class="color-dot" style="background:#8e8e93"></span>
         <span class="name">Sonstiges</span>
         <span class="meta">${count(null) || ""}</span>
-        <button class="open-files" data-files="" title="Dateien ansehen">📁</button>
+        <button class="open-files" data-files="" title="Dateien ansehen">${icon("folder", 16)}</button>
       </div>
     </div>`;
 
@@ -551,7 +604,7 @@ function folderOptions(moduleId, selectedId) {
       .sort((a, b) => a.name.localeCompare(b.name, "de"))
       .map(
         (f) =>
-          `<option value="${f.id}" ${f.id === selectedId ? "selected" : ""}>${"  ".repeat(depth)}📁 ${esc(f.name)}</option>` + build(f.id, depth + 1)
+          `<option value="${f.id}" ${f.id === selectedId ? "selected" : ""}>${"  ".repeat(depth)}${esc(f.name)}</option>` + build(f.id, depth + 1)
       )
       .join("");
   return `<option value="">(Hauptebene)</option>` + build(null, 0);
@@ -568,7 +621,7 @@ function newSheetDialog({ moduleId = null, folderId = null, kind = "notes" } = {
       ${Object.entries(KINDS)
         .map(
           ([k, v]) => `<button class="kind-card ${k === chosen ? "on" : ""}" data-kind="${k}">
-            <span><span class="k-ico">${v.ico}</span><span class="key">${v.key}</span></span><b>${v.label}</b><small>${v.desc}</small></button>`
+            <span><span class="k-ico">${icon(v.ico, 22)}</span><span class="key">${v.key}</span></span><b>${v.label}</b><small>${v.desc}</small></button>`
         )
         .join("")}
     </div>
@@ -580,9 +633,9 @@ function newSheetDialog({ moduleId = null, folderId = null, kind = "notes" } = {
     <label class="field"><span>Titel</span><input class="input" id="nsTitle" placeholder="${esc(KINDS[chosen].label)} ${fmtShort(Date.now())}"></label>
     <label class="field"><span>Ordner</span><select class="input" id="nsFolder">${folderOptions(moduleId, folderId)}</select></label>
     <div class="modal-actions">
-      <button class="btn left" data-files>📁 Dateien ansehen</button>
+      <button class="btn left" data-files>Dateien ansehen</button>
       <button class="btn" data-x>Abbrechen</button>
-      <button class="btn primary" data-ok>Erstellen ↵</button>
+      <button class="btn primary" data-ok>Erstellen</button>
     </div>`);
   const m = openModal.lastModal;
   const titleInput = $("#nsTitle", m);
@@ -643,10 +696,10 @@ function plusMenu() {
   const p = openModal(`
     <h3>Hinzufügen</h3>
     <div class="menu">
-      <button data-a="sheet">📝 Neues Blatt${atRoot ? "" : ` in ${esc(moduleName(moduleId))}`}</button>
-      ${atRoot ? `<button data-a="module">🎓 Neues Modul</button>` : `<button data-a="folder">📁 Neuer Ordner</button>`}
-      <button data-a="import">📥 Datei hinzufügen (PDF, Word, Excel, Bild …)</button>
-      <button data-a="timetable">📅 Stundenplan-Screenshot hinzufügen</button>
+      <button data-a="sheet">${icon("doc")} Neues Blatt${atRoot ? "" : ` in ${esc(moduleName(moduleId))}`}</button>
+      ${atRoot ? `<button data-a="module">${icon("book")} Neues Modul</button>` : `<button data-a="folder">${icon("folder")} Neuer Ordner</button>`}
+      <button data-a="import">${icon("upload")} Datei hinzufügen (PDF, Word, Excel, Bild …)</button>
+      <button data-a="timetable">${icon("calendar")} Stundenplan bearbeiten</button>
     </div>`);
   const m = openModal.lastModal;
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
@@ -860,8 +913,7 @@ async function addAttachment(file, moduleId, folderId) {
   return att;
 }
 
-const fileIcon = (name) =>
-  ({ pdf: "📕", doc: "📘", docx: "📘", xls: "📗", xlsx: "📗", csv: "📗", ppt: "📙", pptx: "📙", zip: "🗜", mp3: "🎵", m4a: "🎵", mp4: "🎬", mov: "🎬" })[fileExt(name)] || "📄";
+const fileIcon = () => icon("doc", 26);
 const fmtSize = (n) => (n > 1e6 ? `${(n / 1e6).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(n / 1e3))} KB`);
 const CONVERTIBLE = ["pdf", "docx", "xlsx", "xls", "ods", "csv", "txt", "md", "html", "htm", "png", "jpg", "jpeg", "gif", "webp"];
 
@@ -883,12 +935,12 @@ async function attachmentMenu(att) {
   const p = openModal(`
     <h3>${fileIcon(att.name)} ${esc(att.name)}</h3><p class="lead">${esc(moduleName(att.moduleId))} · ${fmtSize(att.size)}</p>
     <div class="menu">
-      <button data-a="open">📄 Öffnen</button>
-      ${canEdit ? `<button data-a="edit">✏️ Als Blatt bearbeiten</button>` : ""}
+      <button data-a="open">${icon("doc")} Öffnen</button>
+      ${canEdit ? `<button data-a="edit">${icon("edit")} Als Blatt bearbeiten</button>` : ""}
       <button data-a="download">⤓ Herunterladen</button>
-      <button data-a="rename">✏️ Umbenennen</button>
-      <button data-a="move">📁 Verschieben</button>
-      <button data-a="delete" class="danger">🗑 Löschen</button>
+      <button data-a="rename">${icon("edit")} Umbenennen</button>
+      <button data-a="move">${icon("move")} Verschieben</button>
+      <button data-a="delete" class="danger">${icon("trash")} Löschen</button>
     </div>`);
   const m = openModal.lastModal;
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
@@ -918,16 +970,18 @@ async function attachmentMenu(att) {
 // Dateiübersicht (wie Apple Dateien)
 // ============================================================
 
-function folderSvg(color, emoji = "") {
+function folderSvg(color, cover = null) {
+  const emoji = cover ? coverSymbol(cover, 18) : "";
   return `<span class="folder-wrap"><svg class="folder-ico" viewBox="0 0 74 58"><path d="M4 10a6 6 0 0 1 6-6h17l6 6h31a6 6 0 0 1 6 6v32a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}" opacity=".55"/><path d="M4 18a6 6 0 0 1 6-6h54a6 6 0 0 1 6 6v30a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}"/></svg>${
-    emoji ? `<span class="folder-emoji">${esc(emoji)}</span>` : ""
+    emoji ? `<span class="folder-emoji">${emoji}</span>` : ""
   }</span>`;
 }
 
 // Mini-Vorschau des Blatts (Überschrift + Textanfang) – oder ein eigenes Aussehen
 function docPreviewText(doc) {
   const box = document.createElement("div");
-  box.innerHTML = (doc.html || "") + (doc.floats || "");
+  box.innerHTML = ((doc.html || "") + (doc.floats || "")).replace(/<\/(p|h[1-3]|li|div|td)>/g, "$& ");
+  $$("img", box).forEach((i) => i.remove());
   return box.textContent.replace(/\s+/g, " ").trim().slice(0, 160);
 }
 
@@ -935,26 +989,27 @@ function paperIcon(doc) {
   const color = moduleColor(doc.moduleId);
   const c = doc.cover || {};
   if (c.image) return `<div class="paper-ico cover" style="background-image:url('${c.image}')"></div>`;
-  if (c.color || c.emoji)
-    return `<div class="paper-ico cover" style="background:${esc(c.color || "#fff")}"><span class="cover-emoji">${esc(c.emoji || "")}</span></div>`;
+  if (c.color || c.emoji || c.icon)
+    return `<div class="paper-ico cover ${c.color ? "colored" : ""}" style="background:${esc(c.color || "#fff")}"><span class="cover-emoji">${coverSymbol(c, 30)}</span></div>`;
   return `<div class="paper-ico preview paper-${esc(doc.paper)}"><span class="stripe" style="background:${esc(color)}"></span>
-    <b style="color:${esc(color)}">${esc(doc.heading ?? doc.title)}</b><span class="pv-text">${esc(docPreviewText(doc))}</span><span class="badge">${KINDS[doc.kind]?.ico || ""}</span></div>`;
+    <b style="color:${esc(color)}">${esc(doc.heading ?? doc.title)}</b><span class="pv-text">${esc(docPreviewText(doc))}</span></div>`;
 }
 
 // Aussehen für Blätter, Ordner und Module ändern: Farbe, Symbol, eigenes Bild
-const COVER_EMOJIS = ["📘", "📗", "📙", "📕", "📒", "📓", "📝", "🧪", "📐", "🧠", "💡", "⭐", "🎓", "💼", "🧾", "🗂️", "🌍", "⚖️", "🎨", "🎵"];
+const COVER_ICONS = ["book", "notes", "flask", "chart", "globe", "scale", "bulb", "code", "briefcase", "music", "star", "calendar"];
+const coverSymbol = (c, size) => (c?.icon ? icon(c.icon, size) : esc(c?.emoji || ""));
 async function coverDialog(target, { image = true, color = true } = {}) {
   const cur = target.cover || {};
   let pick = { ...cur };
   const p = openModal(`
-    <h3>🎨 Aussehen ändern</h3>
+    <h3>Aussehen ändern</h3>
     ${color ? `<div class="field"><span>Farbe</span><div class="chip-wrap">${MODULE_COLORS.map((c) => `<button class="swatch big ${pick.color === c ? "on" : ""}" style="background:${c}" data-cc="${c}"></button>`).join("")}</div></div>` : ""}
-    <div class="field"><span>Symbol</span><div class="chip-wrap emoji-pick">${COVER_EMOJIS.map((e) => `<button class="chip ${pick.emoji === e ? "on" : ""}" data-ce="${e}">${e}</button>`).join("")}</div></div>
-    ${image ? `<div class="field"><span>Eigenes Bild</span><button class="btn" id="cvImg">🖼 Bild auswählen</button></div>` : ""}
+    <div class="field"><span>Symbol</span><div class="chip-wrap emoji-pick">${COVER_ICONS.map((e) => `<button class="chip ${pick.icon === e ? "on" : ""}" data-ce="${e}">${icon(e)}</button>`).join("")}</div></div>
+    ${image ? `<div class="field"><span>Eigenes Bild</span><button class="btn" id="cvImg">${icon("image")} Bild auswählen</button></div>` : ""}
     <div class="modal-actions"><button class="btn left" data-reset>Zurücksetzen</button><button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Fertig</button></div>`);
   const m = openModal.lastModal;
   $$("[data-cc]", m).forEach((b) => (b.onclick = () => ((pick.color = b.dataset.cc), delete pick.image, $$("[data-cc]", m).forEach((x) => x.classList.toggle("on", x === b)))));
-  $$("[data-ce]", m).forEach((b) => (b.onclick = () => ((pick.emoji = b.dataset.ce), delete pick.image, $$("[data-ce]", m).forEach((x) => x.classList.toggle("on", x === b)))));
+  $$("[data-ce]", m).forEach((b) => (b.onclick = () => ((pick = { ...pick, icon: b.dataset.ce, emoji: undefined, image: undefined }), $$("[data-ce]", m).forEach((x) => x.classList.toggle("on", x === b)))));
   $("#cvImg", m)?.addEventListener("click", () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -1009,8 +1064,8 @@ function renderFiles(main, recentOnly) {
         <option value="updated">Zuletzt bearbeitet</option><option value="created">Erstellt</option>
         <option value="name">Name</option><option value="kind">Art</option>
       </select>
-      <div class="seg"><button data-layout="grid" title="Symbole">▦</button><button data-layout="list" title="Liste">☰</button></div>
-      <button class="plus-btn" id="plusBtn" title="Neu hinzufügen">＋</button>
+      <div class="seg"><button data-layout="grid" title="Symbole">${icon("grid", 16)}</button><button data-layout="list" title="Liste">${icon("list", 16)}</button></div>
+      <button class="plus-btn" id="plusBtn" title="Neu hinzufügen">${icon("plus", 18)}</button>
     </div>
     <div class="files-body" id="filesBody"></div>`;
 
@@ -1061,7 +1116,7 @@ function renderFilesBody(recentOnly) {
     docs = [...semDocs()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 40);
   } else if (atRoot) {
     folders = [
-      ...semModules().map((m) => ({ type: "module", id: m.id, name: m.name, color: m.color, emoji: m.cover?.emoji, sub: m.examType || `${semDocs().filter((d) => d.moduleId === m.id).length} Objekte` })),
+      ...semModules().map((m) => ({ type: "module", id: m.id, name: m.name, color: m.color, emoji: m.cover, sub: m.examType || `${semDocs().filter((d) => d.moduleId === m.id).length} Objekte` })),
       { type: "module", id: null, name: "Sonstiges", color: "#8e8e93", sub: `${semDocs().filter((d) => !d.moduleId).length} Objekte` },
     ];
     docs = [];
@@ -1069,7 +1124,7 @@ function renderFilesBody(recentOnly) {
     folders = state.folders
       .filter((f) => f.semesterId === state.currentSemesterId && f.moduleId === moduleId && f.parentId === folderId)
       .sort((a, b) => a.name.localeCompare(b.name, "de"))
-      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover?.emoji, sub: `${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
+      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover, sub: `${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
     docs = semDocs().filter((d) => d.moduleId === moduleId && d.folderId === folderId);
   }
   if (!recentOnly || q) docs = sortDocs(docs);
@@ -1082,7 +1137,7 @@ function renderFilesBody(recentOnly) {
   const recent = atRoot && !q ? [...semDocs()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 6) : [];
 
   if (!folders.length && !docs.length && !atts.length && !recent.length && (atRoot || recentOnly || q)) {
-    body.innerHTML = `<div class="empty-state"><div class="big">${q ? "🔍" : "🗒"}</div>${
+    body.innerHTML = `<div class="empty-state"><div class="big">${icon(q ? "search" : "doc", 44)}</div>${
       q ? "Nichts gefunden." : `Noch keine Blätter hier.<br><br><button class="btn primary" id="emptyNew">＋ Neues Blatt</button>`
     }</div>`;
     $("#emptyNew")?.addEventListener("click", () => newSheetDialog({ moduleId: moduleId ?? null, folderId }));
@@ -1092,13 +1147,13 @@ function renderFilesBody(recentOnly) {
   const folderTile = (f) =>
     ui.layout === "grid"
       ? `<div class="tile" data-open-${f.type}="${f.id ?? ""}" role="button" tabindex="0">${folderSvg(f.color, f.emoji)}<div class="title">${esc(f.name)}</div><div class="sub">${esc(f.sub)}</div><button class="more" data-more-${f.type}="${f.id ?? ""}">⋯</button></div>`
-      : `<div class="row" data-open-${f.type}="${f.id ?? ""}" role="button" tabindex="0"><span>📁</span><span>${esc(f.name)}</span><span class="muted hide-sm">Ordner</span><span class="muted hide-sm">${esc(f.sub)}</span><button class="more" data-more-${f.type}="${f.id ?? ""}">⋯</button></div>`;
+      : `<div class="row" data-open-${f.type}="${f.id ?? ""}" role="button" tabindex="0"><span>${icon("folder")}</span><span>${esc(f.name)}</span><span class="muted hide-sm">Ordner</span><span class="muted hide-sm">${esc(f.sub)}</span><button class="more" data-more-${f.type}="${f.id ?? ""}">⋯</button></div>`;
   const docTile = (d) =>
     ui.layout === "grid"
       ? `<div class="tile" data-open-doc="${d.id}" role="button" tabindex="0">${paperIcon(d)}<div class="title">${esc(d.title)}</div><div class="sub">${esc(docSubtitle(d))}${
           q || recentOnly || atRoot ? `<br>${esc(moduleName(d.moduleId))}` : ""
         }</div><button class="more" data-more-doc="${d.id}">⋯</button></div>`
-      : `<div class="row" data-open-doc="${d.id}" role="button" tabindex="0"><span>${KINDS[d.kind]?.ico}</span><span>${esc(d.title)}${
+      : `<div class="row" data-open-doc="${d.id}" role="button" tabindex="0"><span>${icon(KINDS[d.kind]?.ico || "doc")}</span><span>${esc(d.title)}${
           q || recentOnly ? ` <span class="kind-pill">${esc(moduleName(d.moduleId))}</span>` : ""
         }</span><span class="muted hide-sm">${esc(KINDS[d.kind]?.label)}</span><span class="muted hide-sm">${esc(fmtRelative(d.updatedAt))}</span><button class="more" data-more-doc="${d.id}">⋯</button></div>`;
   const wrap = (items) => (ui.layout === "grid" ? `<div class="grid">${items}</div>` : `<div class="list">${items}</div>`);
@@ -1113,10 +1168,10 @@ function renderFilesBody(recentOnly) {
   // Im Modulordner steht vorne immer „Neues Blatt“
   const newTile = !atRoot && !recentOnly && !q
     ? ui.layout === "grid"
-      ? `<div class="tile new-tile" data-new-sheet role="button" tabindex="0"><div class="paper-ico new">＋</div><div class="title">Neues Blatt</div><div class="sub">${esc(moduleName(moduleId))}</div></div>
-         <div class="tile new-tile" data-add-file role="button" tabindex="0"><div class="paper-ico new">📥</div><div class="title">Datei hinzufügen</div><div class="sub">PDF, Word, Excel …</div></div>`
-      : `<div class="row new-row" data-new-sheet role="button" tabindex="0"><span>＋</span><span><b>Neues Blatt</b></span><span></span><span></span><span></span></div>
-         <div class="row new-row" data-add-file role="button" tabindex="0"><span>📥</span><span><b>Datei hinzufügen</b></span><span></span><span></span><span></span></div>`
+      ? `<div class="tile new-tile" data-new-sheet role="button" tabindex="0"><div class="paper-ico new">${icon("plus", 28)}</div><div class="title">Neues Blatt</div><div class="sub">${esc(moduleName(moduleId))}</div></div>
+         <div class="tile new-tile" data-add-file role="button" tabindex="0"><div class="paper-ico new">${icon("upload", 28)}</div><div class="title">Datei hinzufügen</div><div class="sub">PDF, Word, Excel …</div></div>`
+      : `<div class="row new-row" data-new-sheet role="button" tabindex="0"><span>${icon("plus")}</span><span><b>Neues Blatt</b></span><span></span><span></span><span></span></div>
+         <div class="row new-row" data-add-file role="button" tabindex="0"><span>${icon("upload")}</span><span><b>Datei hinzufügen</b></span><span></span><span></span><span></span></div>`
     : "";
   if (docs.length || newTile) html += `<div class="files-group-title">${q ? "Suchergebnisse" : "Blätter"}</div>` + wrap(newTile + docs.map(docTile).join(""));
   const fileTile = (f) =>
@@ -1154,13 +1209,13 @@ async function docMenu(doc) {
   const p = openModal(`
     <h3>${esc(doc.title)}</h3><p class="lead">${esc(moduleName(doc.moduleId))} · ${esc(KINDS[doc.kind]?.label)}</p>
     <div class="menu">
-      <button data-a="open">📄 Öffnen</button>
-      <button data-a="rename">✏️ Umbenennen</button>
-      <button data-a="move">📁 Verschieben</button>
-      <button data-a="export">⤓ Exportieren</button>
-      <button data-a="dup">⧉ Duplizieren</button>
-      <button data-a="cover">🎨 Aussehen ändern</button>
-      <button data-a="delete" class="danger">🗑 Löschen</button>
+      <button data-a="open">${icon("doc")} Öffnen</button>
+      <button data-a="rename">${icon("edit")} Umbenennen</button>
+      <button data-a="move">${icon("move")} Verschieben</button>
+      <button data-a="export">${icon("download")} Exportieren</button>
+      <button data-a="dup">${icon("doc")} Duplizieren</button>
+      <button data-a="cover">${icon("palette")} Aussehen ändern</button>
+      <button data-a="delete" class="danger">${icon("trash")} Löschen</button>
     </div>`);
   const m = openModal.lastModal;
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
@@ -1212,12 +1267,12 @@ async function moveDialog(doc) {
 
 async function folderMenu(folder) {
   const p = openModal(`
-    <h3>📁 ${esc(folder.name)}</h3>
+    <h3>${esc(folder.name)}</h3>
     <div class="menu">
-      <button data-a="rename">✏️ Umbenennen</button>
-      <button data-a="export">⤓ Alle Blätter exportieren</button>
-      <button data-a="cover">🎨 Aussehen ändern</button>
-      <button data-a="delete" class="danger">🗑 Ordner löschen</button>
+      <button data-a="rename">${icon("edit")} Umbenennen</button>
+      <button data-a="export">${icon("download")} Alle Blätter exportieren</button>
+      <button data-a="cover">${icon("palette")} Aussehen ändern</button>
+      <button data-a="delete" class="danger">${icon("trash")} Ordner löschen</button>
     </div>`);
   const m = openModal.lastModal;
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
@@ -1242,10 +1297,10 @@ async function moduleMenu(moduleId) {
   const p = openModal(`
     <h3>${esc(moduleName(moduleId))}</h3>
     <div class="menu">
-      <button data-a="new">📝 Neues Blatt</button>
-      ${mod ? `<button data-a="rename">✏️ Umbenennen</button><button data-a="cover">🎨 Symbol ändern</button>` : ""}
-      <button data-a="export">⤓ Alle Blätter exportieren</button>
-      ${mod ? `<button data-a="delete" class="danger">🗑 Modul löschen</button>` : ""}
+      <button data-a="new">${icon("doc")} Neues Blatt</button>
+      ${mod ? `<button data-a="rename">✏️ Umbenennen</button><button data-a="cover">${icon("palette")} Symbol ändern</button>` : ""}
+      <button data-a="export">${icon("download")} Alle Blätter exportieren</button>
+      ${mod ? `<button data-a="delete" class="danger">${icon("trash")} Modul löschen</button>` : ""}
     </div>`);
   const m = openModal.lastModal;
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
@@ -1324,7 +1379,11 @@ function openDoc(id) {
   doc.mode ??= "notes";
   migrateDoc(doc);
   doc.margins ??= { l: 2.5, r: 2.5 };
-  doc.spacing ??= 1.5;
+  // Zeilenabstand wie in Word/Pages (1,15); ältere Blätter einmalig anpassen
+  if (!doc.spacingV2) {
+    if (!doc.spacing || doc.spacing === 1.5) doc.spacing = 1.15;
+    doc.spacingV2 = true;
+  }
   doc.pages ??= 1;
   ui.view = "editor";
   ui.docId = id;
@@ -1342,8 +1401,8 @@ function renderEditor(main) {
   main.innerHTML = `
     <div class="editor-wrap">
       <div class="toolbar">
-        <button class="tb" data-a="back" title="Zur Dateiübersicht">‹ Dateien</button>
-        <button class="tb" data-a="focus" id="focusBtn" title="Vollbild: Seitenleisten aus-/einblenden">⤢</button>
+        <button class="tb" data-a="back" title="Zur Dateiübersicht">${icon("back")}<span class="lbl2">Dateien</span></button>
+        <button class="tb" data-a="focus" id="focusBtn" title="Vollbild: Leisten aus-/einblenden">${icon("expand")}</button>
         <input class="doc-title-input" id="fileTitle" value="${esc(doc.title)}" title="Dateiname" placeholder="Dateiname" autocomplete="off">
         <div class="grow"></div>
         <div class="seg" id="modeSeg" title="Modus">
@@ -1352,14 +1411,14 @@ function renderEditor(main) {
           <button data-mode="task">Aufgabe</button>
         </div>
         <div class="seg" id="toolSeg" title="Schrift / Stift (${MOD}+Alt+P)">
-          <button data-tool="text">𝐓 Schrift</button>
-          <button data-tool="pen">✎ Stift</button>
+          <button data-tool="text">${icon("text", 16)} Schrift</button>
+          <button data-tool="pen">${icon("pen", 16)} Stift</button>
         </div>
-        <button class="tb" data-a="tidy" title="Rechtschreibung prüfen & aufräumen">✨<span class="lbl"> Aufräumen</span></button>
-        <button class="tb" data-a="design" title="Design & Layout">🎨<span class="lbl"> Design</span></button>
+        <button class="tb" data-a="tidy" title="Rechtschreibung prüfen & aufräumen">${icon("check")}<span class="lbl"> Prüfen</span></button>
+        <button class="tb" data-a="design" title="Design & Layout">${icon("palette")}<span class="lbl"> Design</span></button>
         <span class="saved-state" id="savedState"></span>
         <button class="btn primary" data-a="save" title="Speichern (${MOD}+S)">Speichern</button>
-        <button class="tb" data-a="export" title="Exportieren">⤓<span class="lbl"> Export</span></button>
+        <button class="tb" data-a="export" title="Exportieren">${icon("download")}<span class="lbl"> Export</span></button>
       </div>
       <div class="subbar" id="subbar"></div>
       <div class="editor-body">
@@ -1376,20 +1435,21 @@ function renderEditor(main) {
               <div class="float-layer" id="floats"></div>
               <canvas class="draw-layer" id="drawLayer"></canvas>
               <div class="box-tools" id="boxTools" hidden>
-                <button class="bt-move" title="Verschieben">⠿</button>
-                <button class="bt-del" title="Block löschen">✕</button>
+                <button class="bt-move" title="Verschieben">${icon("grip", 16)}</button>
+                <button class="bt-del" title="Löschen">${icon("x", 14)}</button>
                 <span class="bt-resize" title="Breite ändern"></span>
               </div>
-              <div class="float-bar" id="lassoBar" hidden><span>✨ Auswahl ziehen zum Verschieben</span></div>
+              <div class="float-bar" id="lassoBar" hidden><span>Auswahl ziehen zum Verschieben</span></div>
               <div class="float-bar" id="imgBar" hidden>
                 <button data-iw="25">25 %</button><button data-iw="50">50 %</button><button data-iw="75">75 %</button><button data-iw="100">100 %</button>
                 <button data-ia="left" title="Links">⇤</button><button data-ia="center" title="Mitte">⇹</button><button data-ia="right" title="Rechts">⇥</button>
-                <button data-idel title="Bild löschen">🗑</button>
+                <button data-idetach title="Frei verschieben">${icon("move", 16)}</button><button data-idel title="Bild löschen">${icon("trash", 16)}</button>
               </div>
             </div>
             <div class="glossary-page"><div class="glossary" id="glossary"></div></div>
           </div></div>
           <div class="doc-stats" id="docStats"></div>
+          <div class="zoom-ctl"><button id="zoomOut" title="Verkleinern">${icon("zoomOut", 16)}</button><button id="zoomLabel" title="Auf 100 % zurück">100 %</button><button id="zoomIn" title="Vergrößern">${icon("zoomIn", 16)}</button></div>
         </div>
         <aside class="side-panel" id="sidePanel" hidden></aside>
       </div>
@@ -1466,6 +1526,20 @@ function toggleFocus(force) {
 
 let fitObs = null;
 let sheetScale = 1;
+let userZoom = Number(localStorage.getItem("nh-zoom")) || 1;
+let refit = () => {};
+
+function setZoom(z, anchorY) {
+  const scroll = $("#canvasScroll");
+  const old = sheetScale;
+  userZoom = Math.max(0.6, Math.min(3, Math.round(z * 100) / 100));
+  localStorage.setItem("nh-zoom", userZoom);
+  const rel = scroll ? (scroll.scrollTop + (anchorY ?? scroll.clientHeight / 2)) / old : 0;
+  refit();
+  if (scroll) scroll.scrollTop = rel * sheetScale - (anchorY ?? scroll.clientHeight / 2);
+  const label = $("#zoomLabel");
+  if (label) label.textContent = Math.round(userZoom * 100) + " %";
+}
 
 // Blatt passend zur Bildschirmbreite skalieren – das Layout bleibt gleich, Zeichnungen bleiben an ihrem Platz
 function setupFit() {
@@ -1476,17 +1550,44 @@ function setupFit() {
   const fit = () => {
     if (!sheetEl) return;
     const avail = scroll.clientWidth - (scroll.clientWidth < 700 ? 16 : 48);
-    sheetScale = Math.max(0.35, Math.min(1.6, avail / SHEET_BASE_WIDTH));
-    stack.style.transform = `scale(${sheetScale})`;
+    let base = Math.max(0.35, Math.min(1.6, avail / SHEET_BASE_WIDTH));
+    // Nahe 100 % genau 100 % nehmen: gestochen scharfe Schrift und flüssiges Markieren
+    if (base > 0.94 && base < 1.12) base = 1;
+    sheetScale = Math.round(base * userZoom * 100) / 100;
+    stack.style.transform = sheetScale === 1 ? "none" : `scale(${sheetScale})`;
     zoom.style.width = SHEET_BASE_WIDTH * sheetScale + "px";
     zoom.style.height = stack.offsetHeight * sheetScale + "px";
     resizeCanvas(true);
     positionFloatBars();
   };
+  refit = fit;
   fitObs = new ResizeObserver(fit);
   fitObs.observe(scroll);
   fitObs.observe(stack);
   fit();
+  // Zoomen: mit zwei Fingern (iPad), Strg + Mausrad oder den Knöpfen unten links
+  let gestureStart = 1;
+  scroll.addEventListener("gesturestart", (e) => {
+    e.preventDefault();
+    gestureStart = userZoom;
+  });
+  scroll.addEventListener("gesturechange", (e) => {
+    e.preventDefault();
+    setZoom(gestureStart * e.scale, e.clientY - scroll.getBoundingClientRect().top);
+  });
+  scroll.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      setZoom(userZoom * (e.deltaY < 0 ? 1.08 : 0.92), e.clientY - scroll.getBoundingClientRect().top);
+    },
+    { passive: false }
+  );
+  $("#zoomOut").onclick = () => setZoom(userZoom - 0.1);
+  $("#zoomIn").onclick = () => setZoom(userZoom + 0.1);
+  $("#zoomLabel").onclick = () => setZoom(1);
+  $("#zoomLabel").textContent = Math.round(userZoom * 100) + " %";
 }
 
 // Punkt in Blatt-Koordinaten (unskaliert)
@@ -1782,6 +1883,7 @@ function setupImages() {
         const p = activeImg.closest("p");
         if (p && !box) p.style.textAlign = b.dataset.ia;
       }
+      if ("idetach" in b.dataset && !box) return detachImage(activeImg);
       if ("idel" in b.dataset) {
         (box || activeImg).remove();
         selectImage(null);
@@ -1800,6 +1902,8 @@ function selectImage(img) {
   bar.hidden = !img;
   if (img) {
     img.classList.add("selected");
+    const floating = !!img.closest(".box");
+    $$("[data-ia], [data-idetach]", bar).forEach((b) => (b.hidden = floating));
     positionImgBar();
   }
 }
@@ -1823,6 +1927,37 @@ function onEditorClick(e) {
   }
 }
 
+// Bild als frei verschiebbares Element in die Nähe der aktuellen Stelle legen
+function placeImage(src) {
+  const doc = currentDoc();
+  const img = new Image();
+  img.onload = () => {
+    const w = Math.min(360, SHEET_BASE_WIDTH - insets(doc).l - insets(doc).r);
+    const scroll = $("#canvasScroll");
+    const view = (scroll.getBoundingClientRect().top + scroll.clientHeight / 4 - sheetEl.getBoundingClientRect().top) / sheetScale;
+    const last = editorEl.lastElementChild;
+    const textEnd = !isPdf(doc) && last && last.textContent.trim() ? relTop(last) + last.getBoundingClientRect().height / sheetScale + LINE : 0;
+    const b = newBox(insets(doc).l, Math.max(isPdf(doc) ? 0 : CONTENT_TOP, view, textEnd), `<img src="${src}" alt="">`, { cls: "img-box", w });
+    showBoxTools(b);
+    selectImage(b.querySelector("img"));
+    onEditorInput();
+  };
+  img.src = src;
+}
+
+// Bild aus dem Text lösen → frei verschiebbar
+function detachImage(img) {
+  const r = img.getBoundingClientRect();
+  const s = sheetEl.getBoundingClientRect();
+  const b = newBox((r.left - s.left) / sheetScale, (r.top - s.top) / sheetScale, `<img src="${img.src}" alt="">`, { cls: "img-box", w: r.width / sheetScale });
+  const p = img.closest("p");
+  img.remove();
+  if (p && !p.textContent.trim() && !p.querySelector("img")) p.remove();
+  showBoxTools(b);
+  selectImage(b.querySelector("img"));
+  onEditorInput();
+}
+
 function insertImage() {
   const input = document.createElement("input");
   input.type = "file";
@@ -1831,16 +1966,7 @@ function insertImage() {
     const file = input.files[0];
     if (!file) return;
     const src = await downscaleImage(file, 1600);
-    const doc = currentDoc();
-    if (isPdf(doc)) {
-      const b = newBox(insets(doc).l, nextFreeY(), `<img src="${src}" alt="">`, { cls: "img-box", w: 320 });
-      showBoxTools(b);
-      b.scrollIntoView({ behavior: "smooth", block: "center" });
-    } else {
-      restoreSelection();
-      document.execCommand("insertHTML", false, `<p><img src="${src}" alt="" style="width:60%"></p><p><br></p>`);
-    }
-    onEditorInput();
+    placeImage(src);
   };
   input.click();
 }
@@ -1859,7 +1985,15 @@ function rememberSelection() {
 }
 
 // Kleine Leiste direkt unter einem markierten Wort: Farbe, Textmarker, Fachbegriff
+let selBarTimer = null;
 function updateSelBar() {
+  const bar = $("#selBar");
+  if (bar && !bar.hidden && !bar.contains(document.activeElement)) bar.hidden = true;
+  clearTimeout(selBarTimer);
+  selBarTimer = setTimeout(showSelBar, 220);
+}
+
+function showSelBar() {
   let bar = $("#selBar");
   const sel = getSelection();
   const range = sel.rangeCount ? sel.getRangeAt(0) : null;
@@ -1874,9 +2008,9 @@ function updateSelBar() {
     bar.className = "sel-bar";
     bar.innerHTML = `${TEXT_COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" data-sc="${c}" title="${n}"></button>`).join("")}
       <label class="swatch rainbow" title="Alle Farben"><input type="color" id="selColor" value="#7d3cc8"></label>
-      <button class="sb-btn" data-sa="highlight" title="Textmarker">🖍</button>
+      <button class="sb-btn" data-sa="highlight" title="Textmarker">${icon("marker", 16)}</button>
       <button class="sb-btn" data-sa="bold" title="Fett"><b>B</b></button>
-      <button class="sb-btn term" data-sa="term" title="Als Fachbegriff markieren">● Fachbegriff</button>`;
+      <button class="sb-btn term" data-sa="term" title="Als Fachbegriff markieren">Fachbegriff</button>`;
     document.body.appendChild(bar);
     $$("button", bar).forEach((b) => b.addEventListener("pointerdown", (e) => e.preventDefault()));
     $$("[data-sc]", bar).forEach((b) => b.addEventListener("click", () => applyTextColor(b.dataset.sc)));
@@ -1966,6 +2100,9 @@ function setTool(tool) {
   if (tool === "pen") {
     hideBoxTools();
     selectImage(null);
+    document.activeElement?.blur?.();
+    getSelection().removeAllRanges();
+    $("#selBar")?.setAttribute("hidden", "");
   }
   renderToolSeg();
   renderSubbar();
@@ -2037,18 +2174,18 @@ function renderSubbar() {
       <span class="divider"></span>
       ${TEXT_COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" data-color="${c}" title="${n}"></button>`).join("")}
       <label class="swatch rainbow" title="Alle Farben"><input type="color" id="textColorPick" value="#7d3cc8"></label>
-      <button class="tb hl-btn" data-cmd="highlight" title="Textmarker (gelb)">🖍</button>
-      <button class="tb term-btn" data-cmd="term" title="Fachbegriff rot markieren (${MOD}+Shift+F)">● Fachbegriff</button>
+      <button class="tb hl-btn" data-cmd="highlight" title="Textmarker (gelb)">${icon("marker", 16)}</button>
+      <button class="tb term-btn" data-cmd="term" title="Fachbegriff rot markieren (${MOD}+Shift+F)">Fachbegriff</button>
       <span class="divider"></span>
-      <button class="tb" data-cmd="insertUnorderedList" title="Stichpunkte (${MOD}+Shift+L)">• Stichpunkte</button>
-      <button class="tb" data-cmd="insertOrderedList" title="Nummerierte Liste">1. Nummeriert</button>
-      <button class="tb" data-cmd="checklist" title="Checkliste zum Abhaken">☑ Checkliste</button>
+      <button class="tb" data-cmd="insertUnorderedList" title="Stichpunkte (${MOD}+Shift+L)">${icon("list", 16)}</button>
+      <button class="tb" data-cmd="insertOrderedList" title="Nummerierte Liste">1.2.3.</button>
+      <button class="tb" data-cmd="checklist" title="Checkliste zum Abhaken">${icon("check", 16)}</button>
       <span class="divider"></span>
-      <button class="tb" data-menu="align" title="Ausrichtung">≡ ▾</button>
-      <button class="tb" data-menu="insert" title="Einfügen: Bild, Tabelle …">＋ Einfügen ▾</button>
-      <button class="tb" data-menu="more" title="Mehr Formatierung">⋯</button>
-      <button class="tb undo" data-cmd="undo" title="Rückgängig (${MOD}+Z)">↶</button>
-      <button class="tb undo" data-cmd="redo" title="Wiederholen">↷</button>`;
+      <button class="tb" data-menu="align" title="Ausrichtung & Einzug">${icon("align", 16)}</button>
+      <button class="tb" data-menu="insert" title="Einfügen: Bild, Tabelle …">${icon("plus", 16)} Einfügen</button>
+      <button class="tb" data-menu="more" title="Mehr Formatierung">${icon("more", 16)}</button>
+      <button class="tb undo" data-cmd="undo" title="Rückgängig (${MOD}+Z)">${icon("undo", 16)}</button>
+      <button class="tb undo" data-cmd="redo" title="Wiederholen">${icon("redo", 16)}</button>`;
     $$("[data-cmd]", bar).forEach((b) => {
       b.onmousedown = (e) => e.preventDefault();
       b.onclick = () => runCommand(b.dataset.cmd);
@@ -2104,24 +2241,24 @@ function openTextMenu(which, anchor) {
   };
   if (which === "align") {
     popMenu(anchor, [
-      { label: "⇤ Linksbündig", run: exec("justifyLeft") },
-      { label: "⇹ Zentriert", run: exec("justifyCenter") },
-      { label: "⇥ Rechtsbündig", run: exec("justifyRight") },
-      { label: "☰ Blocksatz", run: exec("justifyFull") },
+      { label: "Linksbündig", run: exec("justifyLeft") },
+      { label: "Zentriert", run: exec("justifyCenter") },
+      { label: "Rechtsbündig", run: exec("justifyRight") },
+      { label: "Blocksatz", run: exec("justifyFull") },
       "-",
-      { label: "→ Einzug vergrößern", run: () => indentBlock(1) },
-      { label: "← Einzug verkleinern", run: () => indentBlock(-1) },
+      { label: "Einzug vergrößern", run: () => indentBlock(1) },
+      { label: "Einzug verkleinern", run: () => indentBlock(-1) },
     ]);
   }
   if (which === "insert") {
     const cell = inTable();
     popMenu(anchor, [
-      { label: "🖼 Bild (Foto / Datei)", run: insertImage },
-      { label: "▦ Tabelle", run: insertTable },
-      { label: "☑ Checkliste", run: () => runCommand("checklist") },
-      { label: "― Trennlinie", run: () => insertBlocks("<hr><p><br></p>") },
-      { label: "🔲 Textfeld (frei verschiebbar)", run: insertFloatText },
-      ...(isPdf(doc) ? [] : [{ label: "⤓ Seitenumbruch", run: () => insertBlocks('<hr class="page-break"><p><br></p>') }]),
+      { label: `${icon("image")} Bild (frei verschiebbar)`, run: insertImage },
+      { label: `${icon("grid")} Tabelle`, run: insertTable },
+      { label: `${icon("check")} Checkliste`, run: () => runCommand("checklist") },
+      { label: `${icon("align")} Trennlinie`, run: () => insertBlocks("<hr><p><br></p>") },
+      { label: `${icon("text")} Textfeld (frei verschiebbar)`, run: insertFloatText },
+      ...(isPdf(doc) ? [] : [{ label: `${icon("doc")} Seitenumbruch`, run: () => insertBlocks('<hr class="page-break"><p><br></p>') }]),
       ...(cell
         ? [
             "-",
@@ -2136,10 +2273,10 @@ function openTextMenu(which, anchor) {
   }
   if (which === "more") {
     popMenu(anchor, [
-      { label: "x² Hochgestellt", run: exec("superscript") },
-      { label: "x₂ Tiefgestellt", run: exec("subscript") },
-      { label: "🖍 Textmarker entfernen", run: exec("hiliteColor", "transparent") },
-      { label: "⌫ Formatierung entfernen", run: exec("removeFormat") },
+      { label: "Hochgestellt (x²)", run: exec("superscript") },
+      { label: "Tiefgestellt (x₂)", run: exec("subscript") },
+      { label: "Textmarker entfernen", run: exec("hiliteColor", "transparent") },
+      { label: "Formatierung entfernen", run: exec("removeFormat") },
       "-",
       { label: "Wörter zählen", run: () => toast($("#docStats").textContent, "", 3500) },
     ]);
@@ -2362,13 +2499,7 @@ function onEditorPaste(e) {
   const file = [...(e.clipboardData?.files || [])].find((f) => f.type.startsWith("image/"));
   e.preventDefault();
   if (file) {
-    downscaleImage(file, 1600).then((src) => {
-      if (isPdf(currentDoc())) {
-        const b = newBox(insets(currentDoc()).l, nextFreeY(), `<img src="${src}" alt="">`, { cls: "img-box", w: 320 });
-        showBoxTools(b);
-      } else document.execCommand("insertHTML", false, `<img src="${src}" alt="" style="width:60%">`);
-      onEditorInput();
-    });
+    downscaleImage(file, 1600).then(placeImage);
     return;
   }
   const text = e.clipboardData.getData("text/plain");
@@ -2380,14 +2511,24 @@ const onEditorInput = (() => {
     renderGlossary();
     resizeCanvas();
   }, 400);
-  return () => {
-    normalizeFonts();
+  // Inhalt erst kurz nach dem Tippen speichern – nicht bei jedem Buchstaben
+  const sync = debounce(() => {
     const doc = currentDoc();
     if (!doc || !editorEl) return;
     doc.html = editorEl.innerHTML;
     doc.floats = floatEl.innerHTML;
-    touchDoc();
-    paginate();
+    persist();
+  }, 500);
+  const relayout = debounce(paginate, 120);
+  return () => {
+    if (editorEl.querySelector("font") || floatEl.querySelector("font")) normalizeFonts();
+    const doc = currentDoc();
+    if (!doc || !editorEl) return;
+    doc.updatedAt = Date.now();
+    sync();
+    updateSavedState("Bearbeitet …");
+    saveIndicator();
+    relayout();
     positionFloatBars();
     if (activeImg) positionImgBar();
     later();
@@ -2494,18 +2635,18 @@ async function saveDoc({ ask = true } = {}) {
   await writeState();
   if (doc.kind === "block") {
     updateSavedState();
-    toast("Gespeichert ✓ (Collegeblock – wird nicht verarbeitet)");
+    toast("Gespeichert (Collegeblock – wird nicht verarbeitet)");
     return;
   }
   const changed = pendingBlocks(doc);
   const sig = hash(changed.map(blockHash).join("|"));
   if (!ask || doc.mode === "normal" || !changed.length || doc.declinedSig === sig) {
     updateSavedState();
-    toast("Gespeichert ✓");
+    toast("Gespeichert");
     return;
   }
   const yes = await confirmModal(
-    "Gespeichert ✓ – jetzt verbessern?",
+    "Gespeichert – jetzt verbessern?",
     `Soll ich die ${changed.length === 1 ? "bearbeitete Stelle" : `${changed.length} bearbeiteten Stellen`} verbessern? Rechtschreibung & Grammatik werden geprüft und die Formatierung wird aufgeräumt – kostenlos. Nur Bearbeitetes wird angefasst.`,
     "Ja, verbessern",
     { cancelLabel: "Nein, so lassen" }
@@ -2526,7 +2667,7 @@ async function tidyDialog() {
   normalizeBlocks();
   const headings = allBlocks().filter((el) => /^H[12]$/.test(el.tagName)).length;
   const p = openModal(`
-    <h3>✨ Blatt aufräumen</h3>
+    <h3>Blatt prüfen &amp; aufräumen</h3>
     <p class="lead">Macht das ganze Blatt ordentlicher – komplett kostenlos.</p>
     <label class="check-row"><input type="checkbox" id="tdSpell" checked> <span><b>Rechtschreibung &amp; Grammatik prüfen</b><small>Du siehst jede Korrektur vorher und kannst sie abwählen.</small></span></label>
     <label class="check-row"><input type="checkbox" id="tdTidy" checked> <span><b>Formatierung aufräumen</b><small>Doppelte Leerzeichen, Satzanfänge groß, „Anführungszeichen“, → Pfeile, Zeilen mit „-“ werden zu Listen, leere Zeilen weg.</small></span></label>
@@ -2577,8 +2718,8 @@ async function improveBlocks(blocks, { spelling = true, tidy = true, toc = false
   resizeCanvas();
   updateSavedState();
   if (spellFailed) toast("Rechtschreibprüfung gerade nicht erreichbar (Internet?) – nur aufgeräumt.", "error", 5000);
-  else if (!chosen.length && !tidied && !toc) toast("Alles sauber ✓");
-  else toast(`✨ ${[chosen.length ? `${chosen.length} Korrektur(en)` : "", tidied ? `${tidied} Stelle(n) aufgeräumt` : "", toc ? "Übersicht eingefügt" : ""].filter(Boolean).join(" · ")}`);
+  else if (!chosen.length && !tidied && !toc) toast("Alles in Ordnung");
+  else toast(`${[chosen.length ? `${chosen.length} Korrektur(en)` : "", tidied ? `${tidied} Stelle(n) aufgeräumt` : "", toc ? "Übersicht eingefügt" : ""].filter(Boolean).join(" · ")}`);
 }
 
 // Zerlegt Blöcke in Texteinheiten: Absatz, Überschrift oder einzelner Listenpunkt
@@ -2923,16 +3064,16 @@ function renderPenBar(bar) {
   if (usesColor && !colors.includes(pen.color) && !pen.customColor) pen.color = colors[0];
   bar.innerHTML = `
     <div class="seg">
-      <button data-pen="pen" class="${pen.kind === "pen" ? "on" : ""}">✎ Stift</button>
-      <button data-pen="marker" class="${pen.kind === "marker" ? "on" : ""}">▮ Marker</button>
-      <button data-pen="shape" class="${pen.kind === "shape" ? "on" : ""}">△ Formen</button>
-      <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">🧽 Radiergummi</button>
-      <button data-pen="lasso" class="${pen.kind === "lasso" ? "on" : ""}" title="Gemaltes einkreisen und verschieben">✨ Magic Stift</button>
+      <button data-pen="pen" class="${pen.kind === "pen" ? "on" : ""}">${icon("pen", 16)} Stift</button>
+      <button data-pen="marker" class="${pen.kind === "marker" ? "on" : ""}">${icon("marker", 16)} Marker</button>
+      <button data-pen="shape" class="${pen.kind === "shape" ? "on" : ""}">${icon("shapes", 16)} Formen</button>
+      <button data-pen="eraser" class="${pen.kind === "eraser" ? "on" : ""}">${icon("eraser", 16)} Radiergummi</button>
+      <button data-pen="lasso" class="${pen.kind === "lasso" ? "on" : ""}" title="Gemaltes einkreisen und verschieben">${icon("lasso", 16)} Magic Stift</button>
     </div>
     ${
       pen.kind === "pen"
         ? `<span class="divider"></span>${PEN_TOOLS.map(([k, l]) => `<button class="chip ${pen.tool === k ? "on" : ""}" data-tool-type="${k}">${l}</button>`).join("")}
-      <button class="chip ${pen.autoShape ? "on" : ""}" id="autoShape" title="Gerade Striche und Pfeile automatisch sauber machen">📐 Auto-Form</button>`
+      <button class="chip ${pen.autoShape ? "on" : ""}" id="autoShape" title="Gerade Striche und Pfeile automatisch sauber machen">Auto-Form</button>`
         : ""
     }
     ${
@@ -2956,8 +3097,8 @@ function renderPenBar(bar) {
       }`
     }
     <span class="divider"></span>
-    <button class="tb" data-p="undo" title="Letzten Strich entfernen">↶ Strich</button>
-    <button class="tb" data-p="clear" title="Alle Zeichnungen löschen">🗑 Alles</button>`;
+    <button class="tb" data-p="undo" title="Letzten Strich entfernen">${icon("undo", 16)}</button>
+    <button class="tb" data-p="clear" title="Alle Zeichnungen löschen">${icon("trash", 16)}</button>`;
   const dot = $("#widthDot", bar);
   const updDot = () => {
     if (!dot) return;
@@ -3106,7 +3247,8 @@ function setupCanvas() {
 
   const startDraw = (e) => {
     if (e.pointerType === "pen") sawPen = true;
-    if (e.pointerType === "touch" && sawPen) return; // Handballen ignorieren
+    // Finger scrollt und zoomt – gezeichnet wird mit Apple Pencil (oder Maus), außer „Finger zeichnet“ ist an
+    if (e.pointerType === "touch" && (sawPen || !state.settings.fingerDraw)) return;
     e.preventDefault();
     try {
       sheetEl.setPointerCapture(e.pointerId);
@@ -3139,6 +3281,16 @@ function setupCanvas() {
     drawStroke(ctx(), current, sheetEl.clientWidth);
   };
   canvasEl.addEventListener("pointerdown", (e) => ui.tool === "pen" && startDraw(e));
+  // Der Pencil soll beim Malen das Blatt nicht verschieben, der Finger schon
+  sheetEl.addEventListener(
+    "touchstart",
+    (e) => {
+      const stylus = [...e.touches].some((t) => t.touchType === "stylus");
+      if (stylus && (ui.tool === "pen" || state.settings.pencilDraws !== false)) e.preventDefault();
+      if (!stylus && ui.tool === "pen" && state.settings.fingerDraw) e.preventDefault();
+    },
+    { passive: false }
+  );
   // Apple Pencil zeichnet immer – auch im Schreib-Modus. Finger & Tastatur schreiben weiter.
   sheetEl.addEventListener(
     "pointerdown",
@@ -3337,9 +3489,9 @@ function recognizeShape(stroke, prev) {
 
 function resizeCanvas(force = false) {
   if (!canvasEl || !sheetEl) return;
-  const ratio = (window.devicePixelRatio || 1) * sheetScale;
   const w = sheetEl.clientWidth;
   const h = sheetEl.offsetHeight;
+  const ratio = canvasRatio(w, h);
   if (force || canvasEl.width !== Math.round(w * ratio) || canvasEl.height !== Math.round(h * ratio)) {
     canvasEl.width = Math.round(w * ratio);
     canvasEl.height = Math.round(h * ratio);
@@ -3349,10 +3501,15 @@ function resizeCanvas(force = false) {
   }
 }
 
+// Safari erlaubt höchstens ~16 Mio. Pixel pro Zeichenfläche
+function canvasRatio(w, h) {
+  return Math.max(0.5, Math.min((window.devicePixelRatio || 1) * sheetScale, Math.sqrt(15e6 / (w * h)), 16000 / h));
+}
+
 function redrawCanvas() {
   if (!canvasEl) return;
   const c = canvasEl.getContext("2d");
-  const ratio = (window.devicePixelRatio || 1) * sheetScale;
+  const ratio = canvasRatio(sheetEl.clientWidth, sheetEl.offsetHeight);
   const W = sheetEl.clientWidth;
   c.setTransform(ratio, 0, 0, ratio, 0, 0);
   c.clearRect(0, 0, canvasEl.width, canvasEl.height);
@@ -3596,13 +3753,13 @@ function renderTaskPanel(panel) {
   const draft = (doc.taskDraft ||= { topic: "", tasks: [newTask()] });
   const formChips = (selected, auto, attr) =>
     Object.entries(ANSWER_FORMS)
-      .map(([k, f]) => `<button class="chip ${k === selected ? "on" : ""}" ${attr}="${k}">${f.ico} ${f.label}${auto === k ? " ✓" : ""}</button>`)
+      .map(([k, f]) => `<button class="chip ${k === selected ? "on" : ""}" ${attr}="${k}">${f.label}${auto === k ? " ·&nbsp;erkannt" : ""}</button>`)
       .join("");
   const stepper = (value, attr, min, max) =>
     `<span class="stepper"><button ${attr}="-1" ${value <= min ? "disabled" : ""}>−</button><b>${value}</b><button ${attr}="1" ${value >= max ? "disabled" : ""}>＋</button></span>`;
 
   panel.innerHTML = `
-    <div class="panel-head">✏️ Aufgaben-Modus <button class="icon-btn" data-close>✕</button></div>
+    <div class="panel-head">Aufgaben-Modus <button class="icon-btn" data-close>${icon("x", 16)}</button></div>
     <div class="panel-body">
       <label class="field"><span>Thema / Übungsblatt (optional)</span><input class="input" id="tkTopic" value="${esc(draft.topic)}" placeholder="z. B. Übungsblatt 3"></label>
       <div class="field-row"><span>Wie viele Aufgaben?</span>${stepper(draft.tasks.length, "data-count", 1, 10)}</div>
@@ -3625,7 +3782,7 @@ function renderTaskPanel(panel) {
                         <b>${String.fromCharCode(97 + j)})</b>
                         <input class="input" data-sq="${i}:${j}" value="${esc(s.question)}" placeholder="Teilaufgabe (optional)">
                         <select class="input" data-sf="${i}:${j}">${Object.entries(ANSWER_FORMS)
-                          .map(([k, f]) => `<option value="${k}" ${k === sform ? "selected" : ""}>${f.ico} ${f.label}</option>`)
+                          .map(([k, f]) => `<option value="${k}" ${k === sform ? "selected" : ""}>${f.label}</option>`)
                           .join("")}</select></div>`;
                     })
                     .join("")
@@ -3634,7 +3791,7 @@ function renderTaskPanel(panel) {
           </div>`;
         })
         .join("")}
-      <button class="btn primary" id="tkInsert" style="width:100%;margin-top:6px">📄 Vorlage ins Blatt einfügen</button>
+      <button class="btn primary" id="tkInsert" style="width:100%;margin-top:6px">Vorlage ins Blatt einfügen</button>
       <button class="btn" id="tkReset" style="width:100%;margin-top:8px">Neu anfangen</button>
       <p class="hint" style="margin-top:12px">Tipp: Der Fragetyp wird an Wörtern wie „erläutern“, „erörtern“ oder „vergleichen“ erkannt (✓). Du kannst ihn jederzeit ändern.</p>
     </div>`;
@@ -3735,8 +3892,21 @@ function insertTaskTemplate(draft) {
     getSelection().addRange(r);
     target.scrollIntoView({ behavior: "smooth", block: "center" });
   }
-  toast("Vorlage eingefügt – einfach ausfüllen ✍️");
+  toast("Vorlage eingefügt – einfach ausfüllen");
 }
+
+// Ruhige, moderne Farben für Überschriften ("" = Modulfarbe)
+const HEADING_COLORS = [
+  ["", "Modulfarbe"],
+  ["#111827", "Graphit"],
+  ["#1e3a8a", "Navy"],
+  ["#4338ca", "Indigo"],
+  ["#0f766e", "Petrol"],
+  ["#166534", "Tannengrün"],
+  ["#9f1239", "Bordeaux"],
+  ["#6b21a8", "Aubergine"],
+  ["#b45309", "Bernstein"],
+];
 
 // Fertige Designs zum Antippen
 const THEMES = {
@@ -3755,7 +3925,7 @@ function renderDesignPanel(panel) {
   const d = doc.design || {};
   const accent = d.accentColor || moduleColor(doc.moduleId);
   panel.innerHTML = `
-    <div class="panel-head">🎨 Design <button class="icon-btn" data-close>✕</button></div>
+    <div class="panel-head">Design <button class="icon-btn" data-close>${icon("x", 16)}</button></div>
     <div class="panel-body">
       <div class="theme-grid">${Object.entries(THEMES)
         .map(([k, t]) => {
@@ -3776,6 +3946,9 @@ function renderDesignPanel(panel) {
         .map((v) => `<button data-sp="${v}" class="${v === doc.spacing ? "on" : ""}">${String(v).replace(".", ",")}</button>`)
         .join("")}</div></div>`
       }
+      <div class="field"><span>Farbe der Überschriften</span><div class="chip-wrap">${HEADING_COLORS.map(
+        ([c, n]) => `<button class="swatch big ${(d.headingColor || "") === c ? "on" : ""}" style="background:${c || moduleColor(doc.moduleId)}" data-hc="${c}" title="${n}"></button>`
+      ).join("")}</div></div>
       <div class="field"><span>Eigene Farben</span>
         <div class="color-row">
           <label><input type="color" data-c="pageColor" value="${esc(d.pageColor || "#ffffff")}"> Blatt</label>
@@ -3813,6 +3986,15 @@ function renderDesignPanel(panel) {
         apply();
       })
   );
+  $$("[data-hc]", panel).forEach(
+    (b) =>
+      (b.onclick = () => {
+        doc.design = { ...doc.design, headingColor: b.dataset.hc, accentColor: b.dataset.hc || doc.design?.accentColor || "" };
+        if (!b.dataset.hc) delete doc.design.accentColor;
+        apply();
+        $$("[data-hc]", panel).forEach((x) => x.classList.toggle("on", x === b));
+      })
+  );
   $$("[data-c]", panel).forEach(
     (inp) =>
       (inp.oninput = () => {
@@ -3843,25 +4025,25 @@ function renderTimetable(main) {
     <div class="files-head"><div class="crumbs"><button>Stundenplan &amp; Module</button></div><span class="kind-pill">${esc(sem.name)}</span></div>
     <div class="tt-wrap">
       <div class="card cal-card">
-        <div class="cal-top"><div><h2>🗓 Mein Stundenplan</h2><p class="hint">Auf eine freie Stelle tippen = Veranstaltung eintragen · auf ein Modul tippen = Ordner mit deinen Blättern öffnen.</p></div>
+        <div class="cal-top"><div><h2>Stundenplan</h2><p class="hint">Auf eine freie Stelle tippen = Veranstaltung eintragen · auf ein Modul tippen = Ordner mit deinen Blättern öffnen.</p></div>
           <button class="btn primary" id="addEntry">＋ Eintragen</button></div>
         <div id="calendar"></div>
       </div>
       <div class="tt-grid">
       <div class="card">
-        <h2>📷 Stundenplan-Screenshot</h2>
+        <h2>Stundenplan-Screenshot</h2>
         <p class="hint">Screenshots hier ablegen, einfügen (${MOD}+V) oder auswählen. Die Texterkennung läuft direkt auf deinem Gerät – kostenlos.</p>
         <div class="dropzone" id="dropzone">Bilder hierher ziehen oder <button class="btn" id="pickImg">Auswählen</button>
           <input type="file" id="imgInput" accept="image/*" multiple hidden></div>
         <div class="thumbs" id="thumbs"></div>
         <div style="margin:12px 0 4px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-          <button class="btn primary" id="scanBtn">🔍 Module erkennen</button>
+          <button class="btn primary" id="scanBtn">Module erkennen</button>
           <span class="hint" id="scanState"></span>
         </div>
         <div id="scanResult"></div>
       </div>
       <div class="card">
-        <h2>🎓 Meine Module</h2>
+        <h2>Meine Module</h2>
         <p class="hint">Alle Module dieses Semesters. Farbe antippen zum Ändern, Prüfungsform auswählen oder eintippen.</p>
         <table class="module-table"><thead><tr><th>Farbe</th><th>Modul</th><th>Prüfungsform</th><th></th></tr></thead><tbody id="modBody"></tbody></table>
         <div style="margin-top:12px;display:flex;gap:8px"><input class="input" id="newModName" placeholder="Neues Modul …"><button class="btn" id="newModBtn">＋</button></div>
@@ -4010,7 +4192,7 @@ function showCandidates(lines) {
       }
     }
     if (!n) return toast("Nichts ausgewählt.");
-    toast(`${n} Modul(e) hinzugefügt ✓ – jetzt oben im Kalender eintragen`, "", 4000);
+    toast(`${n} Modul(e) hinzugefügt – jetzt oben im Kalender eintragen`, "", 4000);
     box.innerHTML = "";
     renderSidebar();
     renderModuleTable();
@@ -4060,7 +4242,7 @@ function renderCalendar() {
         return `<div class="cal-entry" data-entry="${e.id}" role="button" tabindex="0"
           style="top:${top(toMin(e.start))}px;height:${Math.max(26, (toMin(e.end) - toMin(e.start)) * PX - 2)}px;left:calc(${(e._lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:${esc(m.color)}">
           <b>${esc(m.name)}</b>${e.type ? `<small class="cal-type">${esc(e.type)}</small>` : ""}<small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
-          <button class="cal-edit" data-edit="${e.id}" title="Bearbeiten">✎</button></div>`;
+          <button class="cal-edit" data-edit="${e.id}" title="Bearbeiten">${icon("edit", 13)}</button></div>`;
       })
       .join("");
   };
@@ -4176,7 +4358,7 @@ function renderModuleTable() {
         <td><input type="color" value="${esc(m.color)}" data-f="color"></td>
         <td><input class="input" value="${esc(m.name)}" data-f="name"></td>
         <td><input class="input" value="${esc(m.examType)}" data-f="examType" list="examTypes" placeholder="z. B. Klausur"></td>
-        <td style="white-space:nowrap"><button class="btn" data-new title="Neues Blatt">📝</button> <button class="btn danger" data-del title="Löschen">🗑</button></td></tr>`
+        <td style="white-space:nowrap"><button class="btn icon-only" data-new title="Neues Blatt">${icon("doc", 16)}</button> <button class="btn danger icon-only" data-del title="Löschen">${icon("trash", 16)}</button></td></tr>`
         )
         .join("")
     : `<tr><td colspan="4" class="side-empty">Noch keine Module – lade deinen Stundenplan hoch.</td></tr>`;
@@ -4218,11 +4400,11 @@ function downscaleImage(file, max = 1600) {
 async function exportDialog(docs, name) {
   if (!docs.length) return toast("Keine Blätter zum Exportieren.");
   const formats = [
-    ["pdf", "📕 PDF", "Zum Drucken oder Abgeben"],
-    ["doc", "📘 Word (.doc)", "Öffnet in Word & Pages"],
-    ["md", "📗 Markdown (.md)", "Für Notion, Obsidian & Co."],
-    ["txt", "📄 Text (.txt)", "Nur Text"],
-    ["html", "🌐 Webseite (.html)", "Mit Design & Zeichnungen"],
+    ["pdf", "PDF", "Zum Drucken oder Abgeben"],
+    ["doc", "Word (.doc)", "Öffnet in Word & Pages"],
+    ["md", "Markdown (.md)", "Für Notion, Obsidian & Co."],
+    ["txt", "Text (.txt)", "Nur Text"],
+    ["html", "Webseite (.html)", "Mit Design & Zeichnungen"],
   ];
   const p = openModal(`
     <h3>Exportieren</h3><p class="lead">${esc(name)}${docs.length > 1 ? ` · ${docs.length} Blätter` : ""}</p>
@@ -4500,13 +4682,14 @@ async function settingsDialog() {
     <div class="field"><span>Darstellung</span>
       <div class="seg" id="setTheme">${[
         ["auto", "Automatisch"],
-        ["light", "☀︎ Hell"],
-        ["dark", "☾ Dunkel"],
+        ["light", "Hell"],
+        ["dark", "Dunkel"],
       ]
         .map(([k, l]) => `<button data-theme-opt="${k}" class="${(s.theme || "auto") === k ? "on" : ""}">${l}</button>`)
         .join("")}</div>
     </div>
     <label class="check-row" style="border:0;padding:0 0 12px"><input type="checkbox" id="setPencil" ${s.pencilDraws !== false ? "checked" : ""}><span><b>Apple Pencil zeichnet immer</b><small>Auch im Schreib-Modus malt der Stift, Finger & Tastatur schreiben.</small></span></label>
+    <label class="check-row" style="border:0;padding:0 0 12px"><input type="checkbox" id="setFinger" ${s.fingerDraw ? "checked" : ""}><span><b>Im Stift-Modus mit dem Finger zeichnen</b><small>Aus: Der Finger scrollt und zoomt das Blatt, gezeichnet wird mit dem Pencil.</small></span></label>
     <label class="field"><span>Standard-Blatt</span><select class="input" id="setPaper">${Object.entries(PAPERS)
       .map(([k, v]) => `<option value="${k}" ${k === s.paper ? "selected" : ""}>${v}</option>`)
       .join("")}</select></label>
@@ -4535,6 +4718,7 @@ async function settingsDialog() {
   $("#setSize", m).onchange = (e) => ((s.fontSize = Number(e.target.value)), applySettings());
   $("#setPaper", m).onchange = (e) => ((s.paper = e.target.value), persist());
   $("#setPencil", m).onchange = (e) => ((s.pencilDraws = e.target.checked), persist());
+  $("#setFinger", m).onchange = (e) => ((s.fingerDraw = e.target.checked), persist());
   $$("[data-theme-opt]", m).forEach(
     (b) =>
       (b.onclick = () => {
@@ -4577,7 +4761,7 @@ async function settingsDialog() {
         ui.loc = { moduleId: undefined, folderId: null };
         applySettings();
         renderAll();
-        toast("Backup geladen ✓");
+        toast("Backup geladen");
       } catch {
         toast("Keine gültige Backup-Datei.", "error");
       }
@@ -4619,7 +4803,7 @@ document.addEventListener("keydown", (e) => {
   if (key === "s" && !e.shiftKey && !e.altKey) {
     e.preventDefault();
     if (inEditor) saveDoc({ ask: true });
-    else toast("Alles gespeichert ✓");
+    else toast("Alles gespeichert");
     return;
   }
   if (e.altKey && (e.code === "KeyN" || key === "n")) {
@@ -4646,7 +4830,10 @@ document.addEventListener("keydown", (e) => {
 });
 
 window.addEventListener("beforeunload", () => {
-  if (ui.view === "editor" && editorEl) currentDoc().html = editorEl.innerHTML;
+  if (ui.view === "editor" && editorEl) {
+    currentDoc().html = editorEl.innerHTML;
+    currentDoc().floats = floatEl.innerHTML;
+  }
   writeState();
 });
 
