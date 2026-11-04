@@ -4662,4 +4662,6 @@ $("#sidebarToggle").addEventListener("click", () => $("#sidebar").classList.togg
   applySettings();
   document.body.classList.toggle("focus", localStorage.getItem("nh-focus") === "1");
   renderAll();
+  // Offline-Speicher für die App auf dem Home-Bildschirm
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 })();

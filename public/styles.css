@@ -48,8 +48,10 @@ button { cursor: pointer; }
 [hidden] { display: none !important; }
 
 /* ---------- Topbar ---------- */
+/* Als App: nicht unter die Statusleiste des iPads rutschen */
 .topbar {
-  height: 52px;
+  height: calc(52px + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top) !important;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -87,7 +89,7 @@ button { cursor: pointer; }
 .only-mobile { display: none; }
 
 /* ---------- Layout ---------- */
-.layout { display: flex; height: calc(100% - 52px); }
+.layout { display: flex; height: calc(100% - 52px - env(safe-area-inset-top)); }
 .sidebar {
   width: 250px;
   flex-shrink: 0;

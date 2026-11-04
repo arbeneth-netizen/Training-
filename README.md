@@ -14,6 +14,10 @@ Dann im Browser **http://localhost:3000** öffnen.
 
 Ist `APP_PASSWORD` gesetzt, zeigt die Seite zuerst eine Passwortabfrage. Nach der Anmeldung merkt sich der Browser das ein Jahr lang. Online (z. B. bei Render) immer ein Passwort setzen.
 
+## Als App aufs iPad
+
+Seite in **Safari** öffnen → Teilen (□↑) → **„Zum Home-Bildschirm“**. Danach startet das Notizheft wie eine App: eigenes Symbol, ohne Safari-Leisten, und es öffnet sich auch ohne Internet bzw. sofort, selbst wenn der Server gerade schläft. Neue Versionen werden im Hintergrund geladen und sind beim nächsten Öffnen da.
+
 ## Funktionen
 
 | Bereich | Was es macht |

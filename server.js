@@ -22,6 +22,7 @@ const MIME = {
   ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".ico": "image/x-icon",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
 // ---------- HTTP ----------
@@ -117,6 +118,9 @@ async function handleLogin(req, res) {
 const server = http.createServer(async (req, res) => {
   const pathname = new URL(req.url, "http://x").pathname;
   if (APP_PASSWORD && pathname === "/login" && req.method === "POST") return handleLogin(req, res);
+  // App-Symbol & App-Beschreibung braucht das iPad auch vor der Anmeldung
+  const PUBLIC_FILES = ["/manifest.webmanifest", "/apple-touch-icon.png", "/icon-192.png", "/icon-512.png", "/icon.svg", "/sw.js"];
+  if (PUBLIC_FILES.includes(pathname)) return serveStatic(req, res);
   if (!isLoggedIn(req)) {
     res.writeHead(401, { "Content-Type": MIME[".html"] });
     return res.end(loginPage());
