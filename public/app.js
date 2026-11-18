@@ -191,29 +191,74 @@ const putBlob = (id, blob) => blobStore("readwrite", (st) => st.put(blob, id));
 const getBlob = (id) => blobStore("readonly", (st) => st.get(id));
 const delBlob = (id) => blobStore("readwrite", (st) => st.delete(id));
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// Erst wenn der gespeicherte Stand sicher geladen ist, darf geschrieben werden.
+let storageReady = false;
+let startedEmpty = false;
+
+function kvGet(db, key) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE).objectStore(STORE).get(key);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function kvPut(db, key, value) {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).put(value, key);
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+  });
+}
+const hasContent = (st) => !!st && ((st.docs?.length || 0) + (st.modules?.length || 0) + (st.files?.length || 0) > 0);
+
+// Lädt den Stand. Gibt { ok, state } zurück; ok=false heißt: Speicher war nicht erreichbar.
 async function loadState() {
-  try {
-    const db = await openDb();
-    return await new Promise((resolve, reject) => {
-      const req = db.transaction(STORE).objectStore(STORE).get("state");
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    const raw = localStorage.getItem(DB_NAME);
-    return raw ? JSON.parse(raw) : null;
+  let lastErr;
+  // iPad: IndexedDB ist direkt nach dem Start/Update manchmal kurz nicht erreichbar → mehrmals versuchen
+  for (let i = 0; i < 6; i++) {
+    try {
+      const db = await openDb();
+      let st = await kvGet(db, "state");
+      if (!st) {
+        // Fallback: ältere Speicherung oder letzte automatische Sicherung
+        const raw = localStorage.getItem(DB_NAME);
+        if (raw) st = JSON.parse(raw);
+      }
+      if (!st) {
+        const snaps = await listSnapshots(db);
+        if (snaps.length) st = await kvGet(db, snaps[0].key);
+      }
+      return { ok: true, state: st || null };
+    } catch (e) {
+      lastErr = e;
+      await sleep(300 + i * 400);
+    }
   }
+  try {
+    const raw = localStorage.getItem(DB_NAME);
+    if (raw) return { ok: true, state: JSON.parse(raw) };
+  } catch {}
+  console.error("Speicher nicht erreichbar", lastErr);
+  return { ok: false, state: null };
 }
 
 async function writeState() {
+  if (!storageReady) return; // nie einen leeren Stand über echte Daten schreiben
   try {
     const db = await openDb();
-    await new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(state, "state");
-      tx.oncomplete = resolve;
-      tx.onerror = () => reject(tx.error);
-    });
+    if (startedEmpty && !hasContent(state)) {
+      // Die App ist leer gestartet – liegen inzwischen doch Daten im Speicher, nichts überschreiben
+      const stored = await kvGet(db, "state");
+      if (hasContent(stored)) {
+        storageReady = false;
+        location.reload();
+        return;
+      }
+    }
+    await kvPut(db, "state", state);
+    if (hasContent(state)) startedEmpty = false;
   } catch {
     try {
       localStorage.setItem(DB_NAME, JSON.stringify(state));
@@ -221,6 +266,41 @@ async function writeState() {
       toast("Speichern fehlgeschlagen – Speicher voll?", "error");
     }
   }
+}
+
+// Automatische Sicherungen: eine pro Tag, die letzten 7 bleiben.
+const SNAP_KEEP = 7;
+async function listSnapshots(db) {
+  return new Promise((resolve, reject) => {
+    const req = db.transaction(STORE).objectStore(STORE).getAllKeys();
+    req.onsuccess = () =>
+      resolve(
+        req.result
+          .filter((k) => typeof k === "string" && k.startsWith("snap-"))
+          .sort()
+          .reverse()
+          .map((key) => ({ key, day: key.slice(5, 15), before: key.endsWith("-vorher") }))
+      );
+    req.onerror = () => reject(req.error);
+  });
+}
+async function snapshotToday() {
+  if (!hasContent(state)) return;
+  try {
+    const db = await openDb();
+    const key = "snap-" + new Date().toISOString().slice(0, 10);
+    const snaps = await listSnapshots(db);
+    if (!snaps.some((x) => x.key === key)) await kvPut(db, key, JSON.parse(JSON.stringify(state)));
+    const old = (await listSnapshots(db)).slice(SNAP_KEEP);
+    if (old.length) {
+      await new Promise((resolve) => {
+        const tx = db.transaction(STORE, "readwrite");
+        old.forEach((x) => tx.objectStore(STORE).delete(x.key));
+        tx.oncomplete = resolve;
+        tx.onerror = resolve;
+      });
+    }
+  } catch {}
 }
 
 const persist = debounce(writeState, 1200);
@@ -4412,6 +4492,50 @@ async function entryDialog(entry) {
   renderModuleTable();
 }
 
+async function snapshotDialog() {
+  const db = await openDb();
+  const snaps = await listSnapshots(db);
+  const rows = [];
+  for (const x of snaps) {
+    const st = await kvGet(db, x.key);
+    rows.push({ ...x, docs: st?.docs?.length || 0, mods: st?.modules?.length || 0 });
+  }
+  const p = openModal(`
+    <h3>Automatische Sicherungen</h3>
+    <p class="hint">Die App sichert jeden Tag beim ersten Öffnen automatisch. Die letzten ${SNAP_KEEP} Tage bleiben auf dem iPad.</p>
+    ${
+      rows.length
+        ? `<div class="snap-list">${rows
+            .map(
+              (r) => `<div class="snap-row"><span><b>${new Date(r.day).toLocaleDateString("de-DE", { weekday: "short", day: "numeric", month: "long", year: "numeric" })}${r.before ? " (vor Wiederherstellung)" : ""}</b><small>${r.docs} Blätter · ${r.mods} Module</small></span><button class="btn" data-snap="${r.key}">Wiederherstellen</button></div>`
+            )
+            .join("")}</div>`
+        : `<p class="hint">Noch keine Sicherung vorhanden.</p>`
+    }
+    <div class="modal-actions"><button class="btn primary" data-x>Schließen</button></div>`);
+  const m = openModal.lastModal;
+  $("[data-x]", m).onclick = () => m.close();
+  $$("[data-snap]", m).forEach(
+    (b) =>
+      (b.onclick = async () => {
+        m.close();
+        if (!(await confirmModal("Sicherung wiederherstellen?", "Der aktuelle Stand wird durch diese Sicherung ersetzt. Der aktuelle Stand wird vorher selbst gesichert.", "Wiederherstellen", { danger: true }))) return;
+        const db2 = await openDb();
+        if (hasContent(state)) await kvPut(db2, "snap-" + new Date().toISOString().slice(0, 10) + "-vorher", JSON.parse(JSON.stringify(state)));
+        state = await kvGet(db2, b.dataset.snap);
+        storageReady = true;
+        startedEmpty = false;
+        await writeState();
+        ui.view = "files";
+        ui.loc = { moduleId: undefined, folderId: null };
+        applySettings();
+        renderAll();
+        toast("Sicherung wiederhergestellt");
+      })
+  );
+  await p;
+}
+
 function findModule(name) {
   const n = name.trim().toLowerCase();
   const mods = semModules();
@@ -4769,7 +4893,7 @@ async function settingsDialog() {
         state.semesters.length > 1 ? `<button class="btn danger" id="delSem">Semester löschen</button>` : ""
       }</div></div>
     <div class="field"><span>Datensicherung (bis der Uni-Speicher angebunden ist)</span>
-      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="backup">⤓ Backup herunterladen</button><button class="btn" id="restore">⤒ Backup laden</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="backup">⤓ Backup herunterladen</button><button class="btn" id="restore">⤒ Backup laden</button><button class="btn" id="snaps">Automatische Sicherungen</button></div></div>
     <div class="field"><span>Tastenkürzel</span>
       <div class="shortcut-list">
         <kbd>${MOD}+S</kbd><span>Speichern (danach Frage: verbessern?)</span>
@@ -4827,6 +4951,8 @@ async function settingsDialog() {
         if (!data.semesters || !data.docs) throw new Error();
         if (!(await confirmModal("Backup laden?", "Alle aktuellen Daten werden durch das Backup ersetzt.", "Laden", { danger: true }))) return;
         state = data;
+        storageReady = true;
+        startedEmpty = false;
         await writeState();
         ui.view = "files";
         ui.loc = { moduleId: undefined, folderId: null };
@@ -4838,6 +4964,10 @@ async function settingsDialog() {
       }
     };
     input.click();
+  };
+  $("#snaps", m).onclick = () => {
+    m.close();
+    snapshotDialog();
   };
   $("[data-ok]", m).onclick = () => m.close();
   await p;
@@ -4934,8 +5064,21 @@ $("#settingsBtn").addEventListener("click", settingsDialog);
 $("#sidebarToggle").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
 
 (async function init() {
-  state = (await loadState()) || defaultState();
-  if (!state.semesters?.length) state = defaultState();
+  const loaded = await loadState();
+  if (!loaded.ok) {
+    // Speicher nicht erreichbar: NICHTS überschreiben, sondern neu laden lassen
+    document.body.innerHTML = `<div style="max-width:420px;margin:20vh auto;padding:24px;font:16px -apple-system,system-ui,sans-serif;text-align:center">
+      <h2 style="margin:0 0 8px">Daten werden noch geladen …</h2>
+      <p style="color:#666">Der Speicher des iPads hat nicht rechtzeitig geantwortet. Deine Notizen sind nicht weg.</p>
+      <button onclick="location.reload()" style="margin-top:12px;padding:10px 18px;border-radius:10px;border:0;background:#2d5bd7;color:#fff;font-size:16px">Erneut versuchen</button></div>`;
+    setTimeout(() => location.reload(), 2500);
+    return;
+  }
+  state = loaded.state && loaded.state.semesters?.length ? loaded.state : defaultState();
+  startedEmpty = !hasContent(state);
+  storageReady = true;
+  navigator.storage?.persist?.().catch(() => {});
+  snapshotToday();
   if (!state.semesters.some((s) => s.id === state.currentSemesterId)) state.currentSemesterId = state.semesters[0].id;
   state.files ||= [];
   applySettings();
