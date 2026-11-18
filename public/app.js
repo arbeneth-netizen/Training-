@@ -4840,6 +4840,27 @@ function applySettings() {
 // Globale Tastenkürzel & Start
 // ============================================================
 
+// Kein Seiten-Zoom in der App (Zwei-Finger-Zoom von Safari, Strg+Mausrad, Trackpad).
+// Gezoomt wird nur das Blatt im Stift-Modus – das regelt die Zeichenfläche selbst.
+for (const type of ["gesturestart", "gesturechange", "gestureend"]) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+document.addEventListener(
+  "wheel",
+  (e) => {
+    if (e.ctrlKey) e.preventDefault();
+  },
+  { passive: false }
+);
+document.addEventListener(
+  "touchmove",
+  (e) => {
+    // Zwei Finger außerhalb des Blatts im Stift-Modus: nicht zoomen
+    if (e.touches.length > 1 && !(ui.tool === "pen" && e.target.closest?.("#canvasScroll"))) e.preventDefault();
+  },
+  { passive: false }
+);
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && modalClose) return modalClose(null);
   const mod = e.metaKey || e.ctrlKey;

@@ -697,3 +697,7 @@ body.focus .doc-title-input { display: none; }
 .zoom-ctl { display: none; }
 .editor-body:has(.sheet.pen-mode) .zoom-ctl { display: flex; }
 .canvas-scroll:not(:has(.sheet.pen-mode)) { touch-action: pan-x pan-y; }
+
+/* Kein Zoomen der ganzen App: nur scrollen; Doppeltippen zoomt nicht */
+html, body { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+button, a, input, select, label, .tile, .row, .side-item { touch-action: manipulation; }
