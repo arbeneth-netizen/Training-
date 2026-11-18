@@ -701,3 +701,11 @@ body.focus .doc-title-input { display: none; }
 /* Kein Zoomen der ganzen App: nur scrollen; Doppeltippen zoomt nicht */
 html, body { touch-action: pan-x pan-y; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 button, a, input, select, label, .tile, .row, .side-item { touch-action: manipulation; }
+
+/* Veranstaltung: eigene Farbe */
+.ev-colors { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.ev-colors .chip { margin-right: 4px; }
+.ev-colors .swatch.big { width: 30px; height: 30px; }
+.ev-times { display: flex; gap: 10px; }
+.ev-times .field { min-width: 0; }
+.ev-times .input { width: 100%; min-width: 0; box-sizing: border-box; }

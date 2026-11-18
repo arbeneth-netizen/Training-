@@ -4285,8 +4285,9 @@ function renderCalendar() {
     return list
       .map((e) => {
         const m = moduleById(e.moduleId);
+        const c = e.color || m.color;
         return `<div class="cal-entry" data-entry="${e.id}" role="button" tabindex="0"
-          style="top:${top(toMin(e.start))}px;height:${Math.max(26, (toMin(e.end) - toMin(e.start)) * PX - 2)}px;left:calc(${(e._lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:${esc(m.color)}">
+          style="top:${top(toMin(e.start))}px;height:${Math.max(26, (toMin(e.end) - toMin(e.start)) * PX - 2)}px;left:calc(${(e._lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:${esc(c)}">
           <b>${esc(m.name)}</b>${e.type ? `<small class="cal-type">${esc(e.type)}</small>` : ""}<small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
           <button class="cal-edit" data-edit="${e.id}" title="Bearbeiten">${icon("edit", 13)}</button></div>`;
       })
@@ -4341,8 +4342,13 @@ async function entryDialog(entry) {
     <div class="field"><span>Art der Veranstaltung</span><div class="chip-wrap" id="enType">${EVENT_TYPES.map(
       (t) => `<button class="chip ${t === (entry.type || "Vorlesung") ? "on" : ""}" data-type="${t}">${t}</button>`
     ).join("")}</div></div>
+    <div class="field"><span>Farbe</span><div class="ev-colors" id="enColor">
+      <button class="chip ${entry.color ? "" : "on"}" data-col="">Modulfarbe</button>
+      ${MODULE_COLORS.map((c) => `<button class="swatch big ${entry.color === c ? "on" : ""}" style="background:${c}" data-col="${c}" title="${c}"></button>`).join("")}
+      <label class="swatch big rainbow ${entry.color && !MODULE_COLORS.includes(entry.color) ? "on" : ""}" title="Eigene Farbe" style="--picked:${esc(entry.color && !MODULE_COLORS.includes(entry.color) ? entry.color : "transparent")}"><input type="color" id="enColorPick" value="${esc(entry.color || "#2d5bd7")}"></label>
+    </div></div>
     <label class="field"><span>Tag</span><select class="input" id="enDay">${DAYS.map((d, i) => `<option value="${i}" ${i === (entry.day ?? 0) ? "selected" : ""}>${d}</option>`).join("")}</select></label>
-    <div style="display:flex;gap:10px">
+    <div class="ev-times">
       <label class="field" style="flex:1"><span>Von</span><input class="input" type="time" id="enStart" value="${esc(entry.start || "10:00")}"></label>
       <label class="field" style="flex:1"><span>Bis</span><input class="input" type="time" id="enEnd" value="${esc(entry.end || "11:30")}"></label>
     </div>
@@ -4360,6 +4366,25 @@ async function entryDialog(entry) {
         $$("#enType [data-type]", m).forEach((x) => x.classList.toggle("on", x === b));
       })
   );
+  let color = entry.color || "";
+  const markColor = () => {
+    const custom = color && !MODULE_COLORS.includes(color);
+    $$("#enColor [data-col]", m).forEach((b) => b.classList.toggle("on", b.dataset.col === color));
+    const rb = $("#enColor .rainbow", m);
+    rb.classList.toggle("on", !!custom);
+    rb.style.setProperty("--picked", custom ? color : "transparent");
+  };
+  $$("#enColor [data-col]", m).forEach(
+    (b) =>
+      (b.onclick = () => {
+        color = b.dataset.col;
+        markColor();
+      })
+  );
+  $("#enColorPick", m).oninput = (e) => {
+    color = e.target.value;
+    markColor();
+  };
   $("[data-x]", m).onclick = () => m.close(null);
   $("[data-del]", m)?.addEventListener("click", () => m.close("delete"));
   $("[data-ok]", m).onclick = () => {
@@ -4372,7 +4397,7 @@ async function entryDialog(entry) {
     const start = $("#enStart", m).value;
     const end = $("#enEnd", m).value;
     if (!start || !end || toMin(end) <= toMin(start)) return toast("Bitte gültige Uhrzeiten eingeben.");
-    m.close({ moduleId, type, day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
+    m.close({ moduleId, type, color, day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
   };
   const res = await p;
   if (!res) return;
