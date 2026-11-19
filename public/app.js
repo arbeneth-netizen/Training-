@@ -1205,7 +1205,7 @@ function renderFilesBody(recentOnly) {
     folders = state.folders
       .filter((f) => f.semesterId === state.currentSemesterId && f.moduleId === moduleId && f.parentId === folderId)
       .sort((a, b) => a.name.localeCompare(b.name, "de"))
-      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover, sub: `${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
+      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover, sub: `${f.eventType ? f.eventType + " · " : ""}${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
     docs = semDocs().filter((d) => d.moduleId === moduleId && d.folderId === folderId);
   }
   if (!recentOnly || q) docs = sortDocs(docs);
@@ -4177,7 +4177,7 @@ function renderTimetable(main) {
       </div>
     </div></div>`;
   renderCalendar();
-  $("#addEntry").onclick = () => entryDialog({});
+  $("#addEntry").onclick = () => entryDialog(null, {});
 
   const renderThumbs = () => {
     $("#thumbs").innerHTML = tt.images.map((src, i) => `<div class="thumb"><img src="${src}" alt="Screenshot ${i + 1}"><button data-del="${i}" title="Entfernen">✕</button></div>`).join("");
@@ -4366,9 +4366,10 @@ function renderCalendar() {
       .map((e) => {
         const m = moduleById(e.moduleId);
         const c = e.color || m.color;
+        const title = e.title || m.name;
         return `<div class="cal-entry" data-entry="${e.id}" role="button" tabindex="0"
           style="top:${top(toMin(e.start))}px;height:${Math.max(26, (toMin(e.end) - toMin(e.start)) * PX - 2)}px;left:calc(${(e._lane / n) * 100}% + 2px);width:calc(${100 / n}% - 4px);--c:${esc(c)}">
-          <b>${esc(m.name)}</b>${e.type ? `<small class="cal-type">${esc(e.type)}</small>` : ""}<small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
+          <b>${esc(title)}</b>${e.type ? `<small class="cal-type">${esc(e.type)}${e.title && e.title !== m.name ? ` · ${esc(m.name)}` : ""}</small>` : ""}<small>${esc(e.start)}–${esc(e.end)}${e.room ? ` · ${esc(e.room)}` : ""}</small>
           <button class="cal-edit" data-edit="${e.id}" title="Bearbeiten">${icon("edit", 13)}</button></div>`;
       })
       .join("");
@@ -4393,15 +4394,20 @@ function renderCalendar() {
         const y = e.clientY - col.getBoundingClientRect().top;
         const h = Math.min(endH - 1, Math.max(startH, startH + Math.floor(y / (60 * PX))));
         const pad = (n) => String(n).padStart(2, "0");
-        entryDialog({ day: Number(col.dataset.day), start: `${pad(h)}:00`, end: `${pad(h + 1)}:30` });
+        entryDialog(null, { day: Number(col.dataset.day), start: `${pad(h)}:00`, end: `${pad(h + 1)}:30` });
       })
   );
   $$(".cal-entry", box).forEach((el) => {
-    const entry = entries.find((x) => x.id === el.dataset.entry);
+    const id = el.dataset.entry;
     const open = (e) => {
-      if (e.target.closest(".cal-edit")) return entryDialog(entry);
+      e.stopPropagation();
+      // immer den aktuellen Stand dieses einen Eintrags holen
+      const entry = (currentSemester().timetable.entries || []).find((x) => x.id === id);
+      if (!entry) return renderCalendar();
+      if (e.target.closest(".cal-edit")) return entryDialog(entry.id);
+      const folder = entry.folderId && state.folders.find((f) => f.id === entry.folderId);
       ui.view = "files";
-      ui.loc = { moduleId: entry.moduleId, folderId: null };
+      ui.loc = { moduleId: entry.moduleId, folderId: folder ? folder.id : null };
       ui.search = "";
       renderAll();
     };
@@ -4410,15 +4416,37 @@ function renderCalendar() {
   });
 }
 
-async function entryDialog(entry) {
+// Ordner für eine Veranstaltung mit eigenem Namen (z. B. Seminar „Sprecherziehung“ im Modul „Medienbildung“)
+function eventFolder(entry) {
+  if (!entry.title) return null;
+  let f = entry.folderId && state.folders.find((x) => x.id === entry.folderId && x.moduleId === entry.moduleId);
+  if (!f)
+    f = state.folders.find(
+      (x) => x.semesterId === state.currentSemesterId && x.moduleId === entry.moduleId && !x.parentId && x.name.toLowerCase() === entry.title.toLowerCase()
+    );
+  if (!f) {
+    f = { id: uid(), semesterId: state.currentSemesterId, moduleId: entry.moduleId, parentId: null, name: entry.title, createdAt: Date.now() };
+    state.folders.push(f);
+  }
+  f.name = entry.title;
+  f.eventType = entry.type;
+  if (entry.color) f.cover = { ...(f.cover || {}), color: entry.color };
+  return f;
+}
+
+async function entryDialog(entryId, defaults = {}) {
   const mods = semModules();
-  const isNew = !entry.id;
+  const isNew = !entryId;
+  // Eintrag immer frisch aus dem Speicher holen und nur eine Kopie bearbeiten
+  const stored = isNew ? null : (currentSemester().timetable.entries || []).find((x) => x.id === entryId);
+  if (!isNew && !stored) return;
+  const entry = isNew ? { ...defaults } : { ...stored };
   const p = openModal(`
     <h3>${isNew ? "Veranstaltung eintragen" : "Veranstaltung bearbeiten"}</h3>
     <label class="field"><span>Modul</span><select class="input" id="enMod">
       ${mods.map((m) => `<option value="${m.id}" ${m.id === entry.moduleId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}
       <option value="__new">＋ Neues Modul …</option></select></label>
-    <label class="field" id="enNewWrap" ${mods.length ? "hidden" : ""}><span>Name des neuen Moduls</span><input class="input" id="enNew"></label>
+    <label class="field" id="enNewWrap" ${mods.length ? "hidden" : ""}><span>Name des neuen Moduls</span><input class="input" id="enNew" autocomplete="off"></label>
     <div class="field"><span>Art der Veranstaltung</span><div class="chip-wrap" id="enType">${EVENT_TYPES.map(
       (t) => `<button class="chip ${t === (entry.type || "Vorlesung") ? "on" : ""}" data-type="${t}">${t}</button>`
     ).join("")}</div></div>
@@ -4427,6 +4455,9 @@ async function entryDialog(entry) {
       ${MODULE_COLORS.map((c) => `<button class="swatch big ${entry.color === c ? "on" : ""}" style="background:${c}" data-col="${c}" title="${c}"></button>`).join("")}
       <label class="swatch big rainbow ${entry.color && !MODULE_COLORS.includes(entry.color) ? "on" : ""}" title="Eigene Farbe" style="--picked:${esc(entry.color && !MODULE_COLORS.includes(entry.color) ? entry.color : "transparent")}"><input type="color" id="enColorPick" value="${esc(entry.color || "#2d5bd7")}"></label>
     </div></div>
+    <label class="field"><span>Name der Veranstaltung (optional)</span><input class="input" id="enTitle" autocomplete="off" value="${esc(entry.title || "")}" placeholder="leer = wie das Modul, z. B. Sprecherziehung" list="enTitles">
+      <datalist id="enTitles">${[...new Set((currentSemester().timetable.entries || []).map((x) => x.title).filter(Boolean))].map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
+      <small class="hint">Mit Namen bekommt die Veranstaltung im Modul einen eigenen Ordner.</small></label>
     <label class="field"><span>Tag</span><select class="input" id="enDay">${DAYS.map((d, i) => `<option value="${i}" ${i === (entry.day ?? 0) ? "selected" : ""}>${d}</option>`).join("")}</select></label>
     <div class="ev-times">
       <label class="field" style="flex:1"><span>Von</span><input class="input" type="time" id="enStart" value="${esc(entry.start || "10:00")}"></label>
@@ -4477,15 +4508,24 @@ async function entryDialog(entry) {
     const start = $("#enStart", m).value;
     const end = $("#enEnd", m).value;
     if (!start || !end || toMin(end) <= toMin(start)) return toast("Bitte gültige Uhrzeiten eingeben.");
-    m.close({ moduleId, type, color, day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
+    m.close({ moduleId, type, color, title: $("#enTitle", m).value.trim(), day: Number($("#enDay", m).value), start, end, room: $("#enRoom", m).value.trim() });
   };
   const res = await p;
   if (!res) return;
   const tt = currentSemester().timetable;
   tt.entries ||= [];
-  if (res === "delete") tt.entries = tt.entries.filter((x) => x.id !== entry.id);
-  else if (isNew) tt.entries.push({ id: uid(), ...res });
-  else Object.assign(entry, res);
+  if (res === "delete") tt.entries = tt.entries.filter((x) => x.id !== entryId);
+  else {
+    let target = isNew ? null : tt.entries.find((x) => x.id === entryId);
+    if (!target) {
+      target = { id: uid() };
+      tt.entries.push(target);
+    }
+    Object.assign(target, res);
+    if (!target.title) delete target.folderId;
+    const f = eventFolder(target);
+    if (f) target.folderId = f.id;
+  }
   persist();
   renderSidebar();
   renderCalendar();

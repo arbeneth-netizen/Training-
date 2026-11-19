@@ -715,3 +715,8 @@ button, a, input, select, label, .tile, .row, .side-item { touch-action: manipul
 .snap-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--line, rgba(0,0,0,.1)); border-radius: 10px; }
 .snap-row span { display: flex; flex-direction: column; }
 .snap-row small { color: var(--muted, #888); }
+
+/* Stundenplan: größere Bearbeiten-Fläche, damit man nicht den Nachbar-Termin trifft */
+.cal-entry .cal-edit { top: 0; right: 0; min-width: 24px; min-height: 24px; justify-content: center; align-items: center; z-index: 1; }
+.cal-entry { overflow: hidden; }
+#enTitle + datalist + .hint, .field .hint { display: block; margin-top: 4px; font-size: 12px; }
