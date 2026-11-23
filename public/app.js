@@ -1636,8 +1636,8 @@ function setupFit() {
   const stack = $("#sheetStack");
   const fit = () => {
     if (!sheetEl) return;
-    const avail = scroll.clientWidth - (scroll.clientWidth < 700 ? 16 : 48);
-    let base = Math.max(0.35, Math.min(1.6, avail / SHEET_BASE_WIDTH));
+    const avail = scroll.clientWidth - (scroll.clientWidth < 700 ? 20 : 112);
+    let base = Math.max(0.35, Math.min(1.25, avail / SHEET_BASE_WIDTH));
     // Nahe 100 % genau 100 % nehmen: gestochen scharfe Schrift und flüssiges Markieren
     if (base > 0.94 && base < 1.12) base = 1;
     fitBase = base;
@@ -2568,6 +2568,18 @@ function onEditorKeydown(e) {
   if (e.key === " " && !e.shiftKey) {
     const block = currentBlock();
     const sel = getSelection();
+    const li = sel.anchorNode && (sel.anchorNode.nodeType === 1 ? sel.anchorNode : sel.anchorNode.parentElement)?.closest?.("li");
+    if (li && sel.isCollapsed && /^[-*•]$/.test(li.textContent.trim())) {
+      e.preventDefault();
+      li.innerHTML = "<br>";
+      const c = document.createRange();
+      c.setStart(li, 0);
+      c.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(c);
+      onEditorInput();
+      return;
+    }
     if (block && sel.isCollapsed && !block.closest("ul,ol") && /^(P|DIV|H[1-3])$/.test(block.tagName)) {
       const text = block.textContent;
       const kind = MD_SHORTCUTS[text.trim()];
@@ -4442,33 +4454,64 @@ async function entryDialog(entryId, defaults = {}) {
   if (!isNew && !stored) return;
   const entry = isNew ? { ...defaults } : { ...stored };
   const p = openModal(`
-    <h3>${isNew ? "Veranstaltung eintragen" : "Veranstaltung bearbeiten"}</h3>
-    <label class="field"><span>Modul</span><select class="input" id="enMod">
-      ${mods.map((m) => `<option value="${m.id}" ${m.id === entry.moduleId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}
-      <option value="__new">＋ Neues Modul …</option></select></label>
-    <label class="field" id="enNewWrap" ${mods.length ? "hidden" : ""}><span>Name des neuen Moduls</span><input class="input" id="enNew" autocomplete="off"></label>
-    <div class="field"><span>Art der Veranstaltung</span><div class="chip-wrap" id="enType">${EVENT_TYPES.map(
-      (t) => `<button class="chip ${t === (entry.type || "Vorlesung") ? "on" : ""}" data-type="${t}">${t}</button>`
-    ).join("")}</div></div>
-    <div class="field"><span>Farbe</span><div class="ev-colors" id="enColor">
-      <button class="chip ${entry.color ? "" : "on"}" data-col="">Modulfarbe</button>
-      ${MODULE_COLORS.map((c) => `<button class="swatch big ${entry.color === c ? "on" : ""}" style="background:${c}" data-col="${c}" title="${c}"></button>`).join("")}
-      <label class="swatch big rainbow ${entry.color && !MODULE_COLORS.includes(entry.color) ? "on" : ""}" title="Eigene Farbe" style="--picked:${esc(entry.color && !MODULE_COLORS.includes(entry.color) ? entry.color : "transparent")}"><input type="color" id="enColorPick" value="${esc(entry.color || "#2d5bd7")}"></label>
-    </div></div>
-    <label class="field"><span>Name der Veranstaltung (optional)</span><input class="input" id="enTitle" autocomplete="off" value="${esc(entry.title || "")}" placeholder="leer = wie das Modul, z. B. Sprecherziehung" list="enTitles">
-      <datalist id="enTitles">${[...new Set((currentSemester().timetable.entries || []).map((x) => x.title).filter(Boolean))].map((t) => `<option value="${esc(t)}">`).join("")}</datalist>
-      <small class="hint">Mit Namen bekommt die Veranstaltung im Modul einen eigenen Ordner.</small></label>
-    <label class="field"><span>Tag</span><select class="input" id="enDay">${DAYS.map((d, i) => `<option value="${i}" ${i === (entry.day ?? 0) ? "selected" : ""}>${d}</option>`).join("")}</select></label>
-    <div class="ev-times">
-      <label class="field" style="flex:1"><span>Von</span><input class="input" type="time" id="enStart" value="${esc(entry.start || "10:00")}"></label>
-      <label class="field" style="flex:1"><span>Bis</span><input class="input" type="time" id="enEnd" value="${esc(entry.end || "11:30")}"></label>
-    </div>
-    <label class="field"><span>Raum (optional)</span><input class="input" id="enRoom" value="${esc(entry.room || "")}" placeholder="z. B. HS 3"></label>
+    <h3>${isNew ? "Stunde eintragen" : "Stunde bearbeiten"}</h3>
+    <section class="dlg-sec">
+      <div class="dlg-sec-h"><b>Modul</b><small>Der Ordner, in dem alles landet – z. B. „Medienbildung“</small></div>
+      <select class="input" id="enMod" aria-label="Modul">
+        ${mods.map((m) => `<option value="${m.id}" ${m.id === entry.moduleId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}
+        <option value="__new">＋ Neues Modul anlegen …</option></select>
+      <label class="field dlg-new" id="enNewWrap" ${mods.length ? "hidden" : ""}><span>Name des neuen Moduls</span><input class="input" id="enNew" autocomplete="off" placeholder="z. B. Medienbildung"></label>
+    </section>
+    <section class="dlg-sec">
+      <div class="dlg-sec-h"><b>Veranstaltung</b><small>Was genau findet in dieser Stunde statt?</small></div>
+      <div class="chip-wrap" id="enType">${EVENT_TYPES.map(
+        (t) => `<button class="chip ${t === (entry.type || "Vorlesung") ? "on" : ""}" data-type="${t}">${t}</button>`
+      ).join("")}</div>
+      <label class="field" style="margin-top:12px"><span>Eigener Name <em class="opt">optional</em></span><input class="input" id="enTitle" autocomplete="off" value="${esc(entry.title || "")}" placeholder="leer lassen = heißt wie das Modul"></label>
+      <div class="title-sugg" id="enSugg"></div>
+      <small class="hint" id="enTitleHint"></small>
+      <div class="field" style="margin-top:10px"><span>Farbe</span><div class="ev-colors" id="enColor">
+        <button class="chip ${entry.color ? "" : "on"}" data-col="">Modulfarbe</button>
+        ${MODULE_COLORS.map((c) => `<button class="swatch big ${entry.color === c ? "on" : ""}" style="background:${c}" data-col="${c}" title="${c}"></button>`).join("")}
+        <label class="swatch big rainbow ${entry.color && !MODULE_COLORS.includes(entry.color) ? "on" : ""}" title="Eigene Farbe" style="--picked:${esc(entry.color && !MODULE_COLORS.includes(entry.color) ? entry.color : "transparent")}"><input type="color" id="enColorPick" value="${esc(entry.color || "#2d5bd7")}"></label>
+      </div></div>
+    </section>
+    <section class="dlg-sec">
+      <div class="dlg-sec-h"><b>Zeit &amp; Ort</b></div>
+      <label class="field"><span>Tag</span><select class="input" id="enDay">${DAYS.map((d, i) => `<option value="${i}" ${i === (entry.day ?? 0) ? "selected" : ""}>${d}</option>`).join("")}</select></label>
+      <div class="ev-times">
+        <label class="field" style="flex:1"><span>Von</span><input class="input" type="time" id="enStart" value="${esc(entry.start || "10:00")}"></label>
+        <label class="field" style="flex:1"><span>Bis</span><input class="input" type="time" id="enEnd" value="${esc(entry.end || "11:30")}"></label>
+      </div>
+      <label class="field"><span>Raum <em class="opt">optional</em></span><input class="input" id="enRoom" autocomplete="off" value="${esc(entry.room || "")}" placeholder="z. B. HS 3"></label>
+    </section>
     <div class="modal-actions">${isNew ? "" : `<button class="btn danger left" data-del>Löschen</button>`}<button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Speichern</button></div>`);
   const m = openModal.lastModal;
   const modSel = $("#enMod", m);
   if (!mods.length) modSel.value = "__new";
-  modSel.onchange = () => ($("#enNewWrap", m).hidden = modSel.value !== "__new");
+  // Vorschläge: bisherige Namen in diesem Modul – als Knöpfe unter dem Feld, nichts klappt über die Tastatur
+  const titleIn = $("#enTitle", m);
+  const updateTitleUi = () => {
+    const modId = modSel.value;
+    const modName = modId === "__new" ? $("#enNew", m).value.trim() : moduleById(modId)?.name || "";
+    const used = [...new Set((currentSemester().timetable.entries || []).filter((x) => x.moduleId === modId && x.title).map((x) => x.title))];
+    const q = titleIn.value.trim().toLowerCase();
+    const list = used.filter((t) => t.toLowerCase() !== q && (!q || t.toLowerCase().includes(q))).slice(0, 6);
+    $("#enSugg", m).innerHTML = list.length ? `<span>Schon in diesem Modul:</span>${list.map((t) => `<button type="button" class="chip small" data-sugg="${esc(t)}">${esc(t)}</button>`).join("")}` : "";
+    $$("[data-sugg]", m).forEach((bt) => (bt.onclick = () => ((titleIn.value = bt.dataset.sugg), updateTitleUi())));
+    const t = titleIn.value.trim();
+    $("#enTitleHint", m).textContent = t
+      ? `Im Modul ${modName ? "„" + modName + "“" : ""} entsteht dafür ein eigener Ordner „${t}“.`
+      : `Ohne eigenen Namen heißt die Stunde wie das Modul${modName ? " („" + modName + "“)" : ""}.`;
+  };
+  modSel.onchange = () => {
+    $("#enNewWrap", m).hidden = modSel.value !== "__new";
+    if (modSel.value === "__new") $("#enNew", m).focus();
+    updateTitleUi();
+  };
+  titleIn.oninput = updateTitleUi;
+  $("#enNew", m).oninput = updateTitleUi;
+  updateTitleUi();
   let type = entry.type || "Vorlesung";
   $$("#enType [data-type]", m).forEach(
     (b) =>
