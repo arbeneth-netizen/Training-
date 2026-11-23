@@ -809,3 +809,7 @@ button, a, input, select, label, .tile, .row, .side-item { touch-action: manipul
 @media (max-width: 1100px) { .editor-wrap .seg button { padding: 0 9px; } .editor-wrap .toolbar .saved-state { display: none; } }
 :root[data-theme="dark"] .subbar .swatch:not(.rainbow) { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.3); }
 :root[data-theme="dark"] .subbar .swatch.on { box-shadow: 0 0 0 2px var(--accent); }
+
+/* Überschrift nie abschneiden: in Vorschau/Export kleiner, im Blatt passt fitTitle() die Größe an */
+.sheet .doc-title { text-overflow: ellipsis; }
+.sheet div.doc-title { white-space: nowrap; overflow: hidden; }

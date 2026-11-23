@@ -1477,6 +1477,21 @@ function openDoc(id) {
 
 const currentDoc = () => docById(ui.docId);
 
+// Lange Überschriften (z. B. lange Modulnamen) passen sich der Blattbreite an, statt abgeschnitten zu werden
+const titleMeasure = document.createElement("canvas").getContext("2d");
+function fitTitle(el) {
+  if (!el) return;
+  el.style.fontSize = "";
+  const cs = getComputedStyle(el);
+  const base = parseFloat(cs.fontSize);
+  const text = el.value ?? el.textContent;
+  const avail = el.clientWidth - 4;
+  if (!text || avail <= 0) return;
+  titleMeasure.font = `${cs.fontStyle} ${cs.fontWeight} ${base}px ${cs.fontFamily}`;
+  const w = titleMeasure.measureText(text).width + Math.abs(parseFloat(cs.letterSpacing) || 0) * text.length;
+  if (w > avail) el.style.fontSize = Math.max(16, Math.floor((base * avail) / w)) + "px";
+}
+
 function renderEditor(main) {
   const doc = currentDoc();
   main.innerHTML = `
@@ -1564,8 +1579,11 @@ function renderEditor(main) {
 
   $("#docTitle", main).addEventListener("input", (e) => {
     doc.heading = e.target.value;
+    fitTitle(e.target);
     touchDoc();
   });
+  fitTitle($("#docTitle", main));
+  document.fonts?.ready.then(() => fitTitle($("#docTitle")));
   $("#fileTitle", main).addEventListener("input", (e) => {
     doc.title = e.target.value;
     touchDoc();
@@ -4752,6 +4770,8 @@ function docToPagesHtml(doc) {
     <div class="float-layer">${sanitizeHtml(doc.floats || "")}</div></div>`;
   document.body.appendChild(host);
   const sheet = host.firstElementChild;
+  fitTitle($(".doc-title", sheet));
+  const titleFs = $(".doc-title", sheet).style.fontSize;
   const editor = $(".page-content", sheet);
   const floats = $(".float-layer", sheet);
   $$(":scope > .box", floats).forEach(placeBox);
@@ -4800,7 +4820,7 @@ function docToPagesHtml(doc) {
       <div class="sheet-bg"><div class="bg-page"><div class="pg-lines" style="top:${n ? 0 : CONTENT_TOP}px"></div><span class="pg-num">${n + 1}</span></div></div>
       <div class="page-content" style="position:absolute;left:${ins.l}px;right:${ins.r}px;top:${n ? PAGE_TOP : CONTENT_TOP}px">${stripBids(html)}</div>
       <div class="float-layer">${stripBids(floatContent[n].join(""))}</div>
-      ${n === 0 ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div>${isPdf(doc) ? "" : `<div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px">${esc(docHeading(doc))}</div>`}` : ""}
+      ${n === 0 ? `<div class="sheet-date">${esc(fmtLong(doc.createdAt))}</div>${isPdf(doc) ? "" : `<div class="doc-title" style="position:absolute;top:56px;left:${ins.l}px;right:${ins.r}px${titleFs ? ";font-size:" + titleFs : ""}">${esc(docHeading(doc))}</div>`}` : ""}
       ${drawing ? `<img class="drawing" src="${drawing}" alt="">` : ""}
     </section>`;
   });
