@@ -1197,15 +1197,15 @@ function renderFilesBody(recentOnly) {
     docs = [...semDocs()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 40);
   } else if (atRoot) {
     folders = [
-      ...semModules().map((m) => ({ type: "module", id: m.id, name: m.name, color: m.color, emoji: m.cover, sub: m.examType || `${semDocs().filter((d) => d.moduleId === m.id).length} Objekte` })),
-      { type: "module", id: null, name: "Sonstiges", color: "#8e8e93", sub: `${semDocs().filter((d) => !d.moduleId).length} Objekte` },
+      ...semModules().map((m) => ({ type: "module", id: m.id, name: m.name, color: m.color, emoji: m.cover, sub: m.examType || `${countLabel(semDocs().filter((d) => d.moduleId === m.id).length)}` })),
+      { type: "module", id: null, name: "Sonstiges", color: "#8e8e93", sub: `${countLabel(semDocs().filter((d) => !d.moduleId).length)}` },
     ];
     docs = [];
   } else {
     folders = state.folders
       .filter((f) => f.semesterId === state.currentSemesterId && f.moduleId === moduleId && f.parentId === folderId)
       .sort((a, b) => a.name.localeCompare(b.name, "de"))
-      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover, sub: `${f.eventType ? f.eventType + " · " : ""}${[...state.docs, ...state.files].filter((d) => d.folderId === f.id).length} Objekte` }));
+      .map((f) => ({ type: "folder", id: f.id, name: f.name, color: f.cover?.color || moduleColor(moduleId), emoji: f.cover, sub: `${f.eventType ? f.eventType + " · " : ""}${countLabel([...state.docs, ...state.files].filter((d) => d.folderId === f.id).length)}` }));
     docs = semDocs().filter((d) => d.moduleId === moduleId && d.folderId === folderId);
   }
   if (!recentOnly || q) docs = sortDocs(docs);
@@ -1491,6 +1491,8 @@ function fitTitle(el) {
   const w = titleMeasure.measureText(text).width + Math.abs(parseFloat(cs.letterSpacing) || 0) * text.length;
   if (w > avail) el.style.fontSize = Math.max(16, Math.floor((base * avail) / w)) + "px";
 }
+
+const countLabel = (n) => (n === 1 ? "1 Objekt" : `${n} Objekte`);
 
 function renderEditor(main) {
   const doc = currentDoc();
@@ -2139,7 +2141,7 @@ function showSelBar() {
       <label class="swatch rainbow" title="Alle Farben"><input type="color" id="selColor" value="#7d3cc8"></label>
       <button class="sb-btn" data-sa="highlight" title="Textmarker">${icon("marker", 16)}</button>
       <button class="sb-btn" data-sa="bold" title="Fett"><b>B</b></button>
-      <button class="sb-btn term" data-sa="term" title="Als Fachbegriff markieren">Fachbegriff</button>`;
+      <button class="sb-btn term" data-sa="term" title="Als Fachbegriff markieren"><i class="term-dot"></i><span>Fachbegriff</span></button>`;
     document.body.appendChild(bar);
     $$("button", bar).forEach((b) => b.addEventListener("pointerdown", (e) => e.preventDefault()));
     $$("[data-sc]", bar).forEach((b) => b.addEventListener("click", () => applyTextColor(b.dataset.sc)));
@@ -2306,7 +2308,7 @@ function renderSubbar() {
       ${TEXT_COLORS.map(([c, n]) => `<button class="swatch" style="background:${c}" data-color="${c}" title="${n}"></button>`).join("")}
       <label class="swatch rainbow" title="Alle Farben"><input type="color" id="textColorPick" value="#7d3cc8"></label>
       <button class="tb hl-btn" data-cmd="highlight" title="Textmarker (gelb)">${icon("marker", 16)}</button>
-      <button class="tb term-btn" data-cmd="term" title="Fachbegriff rot markieren (${MOD}+Shift+F)">Fachbegriff</button>
+      <button class="tb term-btn" data-cmd="term" title="Als Fachbegriff markieren (${MOD}+Shift+F)"><i class="term-dot"></i><span>Fachbegriff</span></button>
       <span class="divider"></span>
       <button class="tb" data-cmd="insertUnorderedList" title="Stichpunkte (${MOD}+Shift+L)">${icon("list", 16)}</button>
       <button class="tb" data-cmd="insertOrderedList" title="Nummerierte Liste">1.2.3.</button>
