@@ -1535,7 +1535,7 @@ const PAGE_BOTTOM = 56;
 const CM = 37.8;
 
 // Alle Blätter schreiben sich wie Word. Liniert/kariert: Text steht auf den Linien.
-// Importierte PDFs/Bilder: aufs Blatt tippen setzt ein Textfeld. Textfelder & Bilder liegen frei verschiebbar darüber.
+// Importierte PDFs/Bilder: doppelt tippen oder gedrückt halten setzt ein Textfeld. Textfelder & Bilder liegen frei verschiebbar darüber.
 const isRuled = (doc) => doc.paper === "lined" || doc.paper === "grid";
 const isPdf = (doc) => doc.paper === "pdf";
 
@@ -1990,18 +1990,70 @@ function nextFreeY() {
 function setupFloats() {
   const doc = currentDoc();
   boxes().forEach(prepareBox);
-  // PDF/Bild: auf eine freie Stelle tippen → neues Textfeld genau dort
+  // PDF/Bild: Textfeld nur bewusst setzen – doppelt tippen oder kurz gedrückt halten.
+  // Ein normales Antippen oder Scrollen schreibt nichts mehr ins Blatt.
   if (isPdf(doc)) {
-    sheetEl.addEventListener("pointerdown", (e) => {
-      if (ui.tool !== "text" || e.pointerType === "pen" || e.button > 0) return;
-      if (e.target.closest(".box:not(.locked), .box-tools, .float-bar, .sel-bar")) return;
-      e.preventDefault();
-      const p = sheetPoint(e);
-      const b = newBox(p.x, p.y - LINE / 2);
+    let down = null;
+    let lastTap = null;
+    let hold = null;
+    let pending = null;
+    let pendingTimer = null;
+    const place = (pt) => {
+      const b = newBox(pt.x, pt.y - LINE / 2);
       b.focus();
       caretInto(b.firstChild);
       showBoxTools(b);
+    };
+    const free = (e) => ui.tool === "text" && e.pointerType !== "pen" && e.button <= 0 && !e.target.closest(".box:not(.locked), .box-tools, .float-bar, .sel-bar");
+    sheetEl.addEventListener("pointerdown", (e) => {
+      if (!free(e)) return;
+      down = { x: e.clientX, y: e.clientY, t: Date.now(), pt: sheetPoint(e), moved: false };
+      clearTimeout(hold);
+      hold = setTimeout(() => {
+        if (down && !down.moved) {
+          const pt = down.pt;
+          down = null;
+          lastTap = null;
+          place(pt);
+        }
+      }, 550);
     });
+    sheetEl.addEventListener("pointermove", (e) => {
+      if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10) {
+        down.moved = true;
+        clearTimeout(hold);
+      }
+    });
+    const end = (e) => {
+      clearTimeout(hold);
+      if (!down) return;
+      const d = down;
+      down = null;
+      if (d.moved || Date.now() - d.t > 400) return;
+      if (lastTap && Date.now() - lastTap.t < 380 && Math.hypot(d.x - lastTap.x, d.y - lastTap.y) < 30) {
+        lastTap = null;
+        // erst nach dem „click“ setzen, sonst nimmt der Klick dem neuen Feld gleich wieder den Fokus
+        pending = d.pt;
+        clearTimeout(pendingTimer);
+        pendingTimer = setTimeout(() => pending && (place(pending), (pending = null)), 350);
+        return;
+      }
+      lastTap = { x: d.x, y: d.y, t: Date.now() };
+      if (!setupFloats.hinted) {
+        setupFloats.hinted = true;
+        toast("Zum Schreiben doppelt tippen oder kurz gedrückt halten.");
+      }
+    };
+    sheetEl.addEventListener("pointerup", end);
+    sheetEl.addEventListener("pointercancel", () => (clearTimeout(hold), (down = null)));
+    sheetEl.addEventListener("click", () => {
+      if (!pending) return;
+      clearTimeout(pendingTimer);
+      const pt = pending;
+      pending = null;
+      place(pt);
+    });
+    sheetEl.addEventListener("dblclick", (e) => e.preventDefault());
   }
   floatEl.addEventListener("focusin", (e) => {
     const b = e.target.closest?.(".box");
