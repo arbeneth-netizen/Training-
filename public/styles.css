@@ -946,3 +946,10 @@ body { background: var(--bg); color: var(--text); -webkit-font-smoothing: antial
 .page-content:focus-visible, .sheet .doc-title:focus-visible, [contenteditable]:focus-visible, .doc-title-input:focus-visible { outline: none; }
 /* Fachbegriff-Knopf: ruhiger Text mit kleinem Siegelpunkt */
 .term-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--term); box-shadow: 0 0 0 3px color-mix(in srgb, var(--term) 18%, transparent); flex: none; }
+
+/* Ordner-Designs */
+.style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.style-card { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 6px 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); font-size: 12.5px; font-weight: 550; }
+.style-card svg { width: 56px; height: 44px; }
+.style-card.on { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.folder-wrap.fs-ring .folder-emoji { left: 62%; top: 44%; }

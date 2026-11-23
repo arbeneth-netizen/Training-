@@ -764,9 +764,75 @@ function newSheetDialog({ moduleId = null, folderId = null, kind = "notes" } = {
 }
 
 async function newFolderDialog(moduleId, parentId) {
-  const name = await promptModal("Neuer Ordner", "Name des Ordners", "");
-  if (!name) return;
-  state.folders.push({ id: uid(), semesterId: state.currentSemesterId, moduleId, parentId: parentId || null, name, createdAt: Date.now() });
+  const modColor = moduleColor(moduleId);
+  let kind = "Allgemein";
+  let style = "voll";
+  let styleTouched = false;
+  let color = "";
+  const p = openModal(`
+    <h3>Neuer Ordner</h3>
+    <label class="field"><span>Name</span><input class="input" id="nfName" autocomplete="off" placeholder="z. B. Sprecherziehung, Referat, Literatur" autofocus></label>
+    <div class="field"><span>Wofür ist der Ordner?</span><div class="chip-wrap" id="nfKind">${["Allgemein", ...COURSE_TYPES]
+      .map((t) => `<button class="chip ${t === kind ? "on" : ""}" data-kind="${t}">${t}</button>`)
+      .join("")}</div></div>
+    <div class="field"><span>Design</span><div class="style-grid" id="nfStyle"></div></div>
+    <div class="field"><span>Farbe</span><div class="ev-colors" id="nfColor">
+      <button class="chip on" data-col="">Modulfarbe</button>
+      ${MODULE_COLORS.map((c) => `<button class="swatch big" style="background:${c}" data-col="${c}"></button>`).join("")}
+      <label class="swatch big rainbow" title="Eigene Farbe"><input type="color" id="nfPick" value="${esc(modColor)}"></label>
+    </div></div>
+    <div class="modal-actions"><button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Ordner anlegen</button></div>`);
+  const m = openModal.lastModal;
+  const drawStyles = () => {
+    $("#nfStyle", m).innerHTML = FOLDER_STYLES.map(
+      ([k, label]) => `<button class="style-card ${k === style ? "on" : ""}" data-style="${k}"><svg viewBox="0 0 74 58">${folderShape(color || modColor, k)}</svg><span>${label}</span></button>`
+    ).join("");
+    $$("[data-style]", m).forEach((bt) => (bt.onclick = () => ((style = bt.dataset.style), (styleTouched = true), drawStyles())));
+  };
+  drawStyles();
+  $$("[data-kind]", m).forEach(
+    (bt) =>
+      (bt.onclick = () => {
+        kind = bt.dataset.kind;
+        $$("[data-kind]", m).forEach((x) => x.classList.toggle("on", x === bt));
+        // Vorlesungen, Seminare usw. bekommen automatisch das Kurs-Design (änderbar)
+        if (!styleTouched) style = kind === "Allgemein" ? "voll" : "kurs";
+        drawStyles();
+      })
+  );
+  const setColor = (c) => {
+    color = c;
+    $$("#nfColor [data-col]", m).forEach((x) => x.classList.toggle("on", x.dataset.col === c));
+    const rb = $("#nfColor .rainbow", m);
+    const custom = c && !MODULE_COLORS.includes(c);
+    rb.classList.toggle("on", !!custom);
+    rb.style.setProperty("--picked", custom ? c : "transparent");
+    drawStyles();
+  };
+  $$("#nfColor [data-col]", m).forEach((bt) => (bt.onclick = () => setColor(bt.dataset.col)));
+  $("#nfPick", m).oninput = (e) => setColor(e.target.value);
+  const ok = () => {
+    const name = $("#nfName", m).value.trim();
+    if (!name) return $("#nfName", m).focus();
+    m.close({ name });
+  };
+  $("#nfName", m).addEventListener("keydown", (e) => e.key === "Enter" && ok());
+  $("[data-ok]", m).onclick = ok;
+  $("[data-x]", m).onclick = () => m.close(null);
+  const res = await p;
+  if (!res) return;
+  const cover = { style };
+  if (color) cover.color = color;
+  state.folders.push({
+    id: uid(),
+    semesterId: state.currentSemesterId,
+    moduleId,
+    parentId: parentId || null,
+    name: res.name,
+    eventType: kind === "Allgemein" ? undefined : kind,
+    cover,
+    createdAt: Date.now(),
+  });
   persist();
   renderAll();
 }
@@ -1051,10 +1117,44 @@ async function attachmentMenu(att) {
 // Dateiübersicht (wie Apple Dateien)
 // ============================================================
 
+// Ordner-Designs: Form wählbar, Farbe = Modulfarbe oder eigene
+const FOLDER_STYLES = [
+  ["voll", "Voll"],
+  ["umriss", "Umriss"],
+  ["etikett", "Etikett"],
+  ["kurs", "Kurs"],
+  ["ring", "Ringordner"],
+  ["mappe", "Mappe"],
+];
+const COURSE_TYPES = ["Vorlesung", "Seminar", "Übung", "Tutorium", "Kolloquium", "Praktikum"];
+function folderShape(color, style = "voll") {
+  const c = esc(color);
+  const back = `<path d="M4 10a6 6 0 0 1 6-6h17l6 6h31a6 6 0 0 1 6 6v32a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${c}" opacity=".55"/>`;
+  const front = `<path d="M4 18a6 6 0 0 1 6-6h54a6 6 0 0 1 6 6v30a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${c}"/>`;
+  switch (style) {
+    case "umriss":
+      return `<path d="M4 10a6 6 0 0 1 6-6h17l6 6h31a6 6 0 0 1 6 6v32a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${c}" fill-opacity=".14" stroke="${c}" stroke-width="2.4"/>
+        <path d="M5.5 18.5a5 5 0 0 1 5-5h53a5 5 0 0 1 5 5" fill="none" stroke="${c}" stroke-width="2.4" stroke-linecap="round"/>`;
+    case "etikett":
+      return back + front + `<rect x="17" y="26" width="40" height="13" rx="3" fill="#fff" opacity=".92"/><path d="M23 32.5h28" stroke="${c}" stroke-width="2" stroke-linecap="round" opacity=".55"/>`;
+    case "kurs":
+      return back + front + `<path d="M4 42h66v6a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="#000" opacity=".16"/>
+        <path d="M37 20l-13 5.5 13 5.5 13-5.5z" fill="#fff"/><path d="M30.5 28.6v4.4c0 1.6 2.9 3.2 6.5 3.2s6.5-1.6 6.5-3.2v-4.4" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/><path d="M50 25.5v6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>`;
+    case "ring":
+      return `<rect x="6" y="4" width="62" height="50" rx="5" fill="${c}"/><rect x="6" y="4" width="14" height="50" rx="5" fill="#000" opacity=".2"/>
+        <circle cx="13" cy="18" r="3.2" fill="#fff" opacity=".9"/><circle cx="13" cy="40" r="3.2" fill="#fff" opacity=".9"/><rect x="30" y="14" width="30" height="16" rx="2.5" fill="#fff" opacity=".9"/>`;
+    case "mappe":
+      return back + front + `<path d="M58 12v42" stroke="#fff" stroke-width="3.2" opacity=".75"/><path d="M4 22h66" stroke="#000" stroke-width="1.2" opacity=".12"/>`;
+    default:
+      return back + front;
+  }
+}
 function folderSvg(color, cover = null) {
-  const emoji = cover ? coverSymbol(cover, 18) : "";
-  return `<span class="folder-wrap"><svg class="folder-ico" viewBox="0 0 74 58"><path d="M4 10a6 6 0 0 1 6-6h17l6 6h31a6 6 0 0 1 6 6v32a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}" opacity=".55"/><path d="M4 18a6 6 0 0 1 6-6h54a6 6 0 0 1 6 6v30a6 6 0 0 1-6 6H10a6 6 0 0 1-6-6z" fill="${esc(color)}"/></svg>${
-    emoji ? `<span class="folder-emoji">${emoji}</span>` : ""
+  const style = cover?.style || "voll";
+  const symbol = cover && (cover.icon || cover.emoji || cover.image) ? coverSymbol(cover, 18) : "";
+  const showSymbol = symbol && !["kurs", "etikett"].includes(style);
+  return `<span class="folder-wrap fs-${style}"><svg class="folder-ico" viewBox="0 0 74 58">${folderShape(color, style)}</svg>${
+    showSymbol ? `<span class="folder-emoji">${symbol}</span>` : ""
   }</span>`;
 }
 
@@ -1079,17 +1179,27 @@ function paperIcon(doc) {
 // Aussehen für Blätter, Ordner und Module ändern: Farbe, Symbol, eigenes Bild
 const COVER_ICONS = ["book", "notes", "flask", "chart", "globe", "scale", "bulb", "code", "briefcase", "music", "star", "calendar"];
 const coverSymbol = (c, size) => (c?.icon ? icon(c.icon, size) : esc(c?.emoji || ""));
-async function coverDialog(target, { image = true, color = true } = {}) {
+async function coverDialog(target, { image = true, color = true, shapes = false, baseColor = "#2d5bd7" } = {}) {
   const cur = target.cover || {};
   let pick = { ...cur };
   const p = openModal(`
     <h3>Aussehen ändern</h3>
+    ${shapes ? `<div class="field"><span>Design</span><div class="style-grid" id="cvStyle"></div></div>` : ""}
     ${color ? `<div class="field"><span>Farbe</span><div class="chip-wrap">${MODULE_COLORS.map((c) => `<button class="swatch big ${pick.color === c ? "on" : ""}" style="background:${c}" data-cc="${c}"></button>`).join("")}</div></div>` : ""}
     <div class="field"><span>Symbol</span><div class="chip-wrap emoji-pick">${COVER_ICONS.map((e) => `<button class="chip ${pick.icon === e ? "on" : ""}" data-ce="${e}">${icon(e)}</button>`).join("")}</div></div>
     ${image ? `<div class="field"><span>Eigenes Bild</span><button class="btn" id="cvImg">${icon("image")} Bild auswählen</button></div>` : ""}
     <div class="modal-actions"><button class="btn left" data-reset>Zurücksetzen</button><button class="btn" data-x>Abbrechen</button><button class="btn primary" data-ok>Fertig</button></div>`);
   const m = openModal.lastModal;
-  $$("[data-cc]", m).forEach((b) => (b.onclick = () => ((pick.color = b.dataset.cc), delete pick.image, $$("[data-cc]", m).forEach((x) => x.classList.toggle("on", x === b)))));
+  const drawShapes = () => {
+    const box = $("#cvStyle", m);
+    if (!box) return;
+    box.innerHTML = FOLDER_STYLES.map(
+      ([k, label]) => `<button class="style-card ${k === (pick.style || "voll") ? "on" : ""}" data-style="${k}"><svg viewBox="0 0 74 58">${folderShape(pick.color || baseColor, k)}</svg><span>${label}</span></button>`
+    ).join("");
+    $$("[data-style]", box).forEach((bt) => (bt.onclick = () => ((pick.style = bt.dataset.style), drawShapes())));
+  };
+  drawShapes();
+  $$("[data-cc]", m).forEach((b) => (b.onclick = () => ((pick.color = b.dataset.cc), delete pick.image, $$("[data-cc]", m).forEach((x) => x.classList.toggle("on", x === b)), drawShapes())));
   $$("[data-ce]", m).forEach((b) => (b.onclick = () => ((pick = { ...pick, icon: b.dataset.ce, emoji: undefined, image: undefined }), $$("[data-ce]", m).forEach((x) => x.classList.toggle("on", x === b)))));
   $("#cvImg", m)?.addEventListener("click", () => {
     const input = document.createElement("input");
@@ -1363,7 +1473,7 @@ async function folderMenu(folder) {
     if (name) folder.name = name;
   }
   if (a === "export") await exportDialog(sortDocs(state.docs.filter((d) => d.folderId === folder.id)), folder.name);
-  if (a === "cover") return coverDialog(folder, { image: false });
+  if (a === "cover") return coverDialog(folder, { image: false, shapes: true, baseColor: moduleColor(folder.moduleId) });
   if (a === "delete" && (await confirmModal("Ordner löschen?", "Die Blätter darin bleiben erhalten und rutschen eine Ebene nach oben.", "Löschen", { danger: true }))) {
     [...state.docs, ...state.files].forEach((d) => d.folderId === folder.id && (d.folderId = folder.parentId));
     state.folders.forEach((f) => f.parentId === folder.id && (f.parentId = folder.parentId));
@@ -1387,7 +1497,7 @@ async function moduleMenu(moduleId) {
   $$("[data-a]", m).forEach((b) => (b.onclick = () => m.close(b.dataset.a)));
   const a = await p;
   if (a === "new") return newSheetDialog({ moduleId });
-  if (a === "cover") return coverDialog(mod, { image: false, color: false });
+  if (a === "cover") return coverDialog(mod, { image: false, color: false, shapes: true, baseColor: mod.color });
   if (a === "rename") {
     const name = await promptModal("Modul umbenennen", "Name", mod.name);
     if (name) mod.name = name;
@@ -4462,7 +4572,8 @@ function eventFolder(entry) {
   }
   f.name = entry.title;
   f.eventType = entry.type;
-  if (entry.color) f.cover = { ...(f.cover || {}), color: entry.color };
+  f.cover = { style: "kurs", ...(f.cover || {}) };
+  if (entry.color) f.cover.color = entry.color;
   return f;
 }
 
